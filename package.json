@@ -1,0 +1,15 @@
+{
+  "name": "yaychess",
+  "version": "v0.0.1 Beta",
+  "description": "It's a Chess interface where things are yeah...",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "author": "",
+  "license": "ISC"
+}

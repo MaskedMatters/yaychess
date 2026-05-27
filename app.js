@@ -1,0 +1,702 @@
+/**
+ * YayChess App Controller
+ * Manages user identity (ephemeral — no localStorage), Socket.io matchmaking,
+ * real-time challenge flow, synchronized chess moves, and UI event bindings.
+ */
+
+// ─── Username Generation ───────────────────────────────────────────────────────
+const ADJECTIVES = [
+  'Swift', 'Crafty', 'Bold', 'Silent', 'Clever',
+  'Fierce', 'Mighty', 'Nimble', 'Sneaky', 'Shadow',
+  'Golden', 'Cosmic', 'Mystic', 'Radiant', 'Brave',
+  'Wild', 'Astro', 'Alpha', 'Zenith', 'Apex'
+];
+
+const ANIMALS = [
+  { name: 'Panther',  emoji: '🐆' },
+  { name: 'Falcon',   emoji: '🦅' },
+  { name: 'Cobra',    emoji: '🐍' },
+  { name: 'Badger',   emoji: '🦡' },
+  { name: 'Fox',      emoji: '🦊' },
+  { name: 'Wolf',     emoji: '🐺' },
+  { name: 'Tiger',    emoji: '🐯' },
+  { name: 'Shark',    emoji: '🦈' },
+  { name: 'Owl',      emoji: '🦉' },
+  { name: 'Lynx',     emoji: '🐱' },
+  { name: 'Raven',    emoji: '🐦' },
+  { name: 'Grizzly',  emoji: '🐻' },
+  { name: 'Stallion', emoji: '🐴' },
+  { name: 'Viper',    emoji: '🐍' },
+  { name: 'Phoenix',  emoji: '🔥' },
+  { name: 'Hawk',     emoji: '🦅' },
+  { name: 'Cheetah',  emoji: '🐆' },
+  { name: 'Orca',     emoji: '🐋' }
+];
+
+function generateIdentity() {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
+  return { username: `${adj}${animal.name}`, emoji: animal.emoji };
+}
+
+// ─── App ───────────────────────────────────────────────────────────────────────
+/* global ChessBoard, io */
+class ChessApp {
+  constructor() {
+    this.board = null;
+    this.socket = null;
+
+    // Ephemeral identity (gone on reload)
+    this.currentUser = generateIdentity();
+
+    // Active match state
+    this.activeMatch = null; // { matchId, color, opponent }
+
+    // Pending incoming challenge info (for the modal)
+    this.pendingChallenge = null; // { fromSocketId, username, emoji }
+
+    // Online lobby list (from server)
+    this.onlinePlayers = [];
+
+    this.selectedColor = 'white';
+    this.timers = { white: 0, black: 0 };
+    this.incrementSeconds = 0;
+    this.timerInterval = null;
+    this._lastChallengedSocketId = null;
+  }
+
+  init() {
+    this.board = new ChessBoard('chessboard');
+    this.board.init();
+
+    this._renderUserProfile();
+    this._connectSocket();
+    this.bindEvents();
+  }
+
+  // ─── Identity ──────────────────────────────────────────────────────────────
+  _renderUserProfile() {
+    document.getElementById('user-name-display').innerText = this.currentUser.username;
+    document.getElementById('header-username-display').innerText = this.currentUser.username;
+    document.getElementById('user-avatar-placeholder').innerText = this.currentUser.emoji;
+    document.getElementById('header-profile-avatar').innerText = this.currentUser.emoji;
+    // Hide countdown — no session expiry anymore
+    const countdown = document.getElementById('session-countdown');
+    if (countdown) countdown.style.display = 'none';
+  }
+
+  regenIdentity() {
+    this.currentUser = generateIdentity();
+    this._renderUserProfile();
+    // Re-register with the server
+    if (this.socket) {
+      this.socket.emit('register_user', {
+        username: this.currentUser.username,
+        emoji: this.currentUser.emoji
+      });
+    }
+    this.board.playSynthSound('move');
+  }
+
+  // ─── Socket.io ─────────────────────────────────────────────────────────────
+  _connectSocket() {
+    this.socket = io();
+
+    this.socket.on('connect', () => {
+      this.socket.emit('register_user', {
+        username: this.currentUser.username,
+        emoji: this.currentUser.emoji
+      });
+    });
+
+    // Receive the current lobby list
+    this.socket.on('online_users_list', (users) => {
+      // Exclude ourselves by socketId
+      this.onlinePlayers = users.filter(u => u.socketId !== this.socket.id);
+      this._renderLobby(this.onlinePlayers);
+    });
+
+    // Incoming challenge
+    this.socket.on('challenge_received', ({ fromSocketId, username, emoji, requestedColor, timeSeconds, incrementSeconds }) => {
+      this.pendingChallenge = { fromSocketId, username, emoji, requestedColor, timeSeconds, incrementSeconds };
+      this._showChallengeModal(username, emoji, false);
+    });
+
+    // Challenge was declined
+    this.socket.on('challenge_declined', ({ username }) => {
+      this._hideChallengeModal();
+      this._showStatusBanner(`${username} declined your challenge.`);
+    });
+
+    // Match started
+    this.socket.on('match_started', ({ matchId, color, opponent, timeSeconds, incrementSeconds }) => {
+      this._hideChallengeModal();
+      this.activeMatch = { matchId, color, opponent };
+      this._startMatch(color, opponent, timeSeconds, incrementSeconds);
+    });
+
+    // Incoming challenge was cancelled by challenger
+    this.socket.on('challenge_cancelled', ({ fromSocketId }) => {
+      if (this.pendingChallenge && this.pendingChallenge.fromSocketId === fromSocketId) {
+        this._hideChallengeModal();
+        this._showStatusBanner('Challenge was cancelled.');
+      }
+    });
+
+    // Incoming move from opponent
+    this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol }) => {
+      this.board.executeMove(fromRow, fromCol, toRow, toCol, false);
+
+      // Apply increment to opponent
+      const opponentColor = this.board.playerColor === 'white' ? 'black' : 'white';
+      this.timers[opponentColor] += this.incrementSeconds;
+      this._updateTimerDisplay();
+
+      this._updateTurnIndicator();
+    });
+
+    // Chat message received
+    this.socket.on('chat_message_received', ({ message }) => {
+      this._appendChatMessage(message, 'remote');
+    });
+
+    // Game over from server
+    this.socket.on('game_over', ({ winner, reason }) => {
+      this._handleGameOver(winner, reason);
+    });
+
+    // Draw offer from opponent
+    this.socket.on('draw_offered', () => {
+      const modal = document.getElementById('draw-modal');
+      if (modal) modal.classList.remove('hidden');
+    });
+
+    this.socket.on('draw_declined', () => {
+      this._showStatusBanner('Opponent declined the draw offer.');
+    });
+
+    // Opponent left
+    this.socket.on('opponent_disconnected', () => {
+      this._showStatusBanner('Your opponent disconnected.');
+      this._endMatch();
+    });
+  }
+
+  // ─── Lobby Rendering ───────────────────────────────────────────────────────
+  _renderLobby(players) {
+    const container = document.getElementById('opponents-list-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (players.length === 0) {
+      container.innerHTML = '<div class="no-results">No players online right now</div>';
+      return;
+    }
+
+    players.forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'opponent-card';
+      card.innerHTML = `
+        <span class="opp-dot online"></span>
+        <div class="opp-avatar">${p.emoji}</div>
+        <div class="opp-details">
+          <span class="opp-name">${p.username}</span>
+          <span class="opp-status-text">Lobby — Ready</span>
+        </div>
+        <button class="challenge-btn" data-socket-id="${p.socketId}">Challenge</button>
+      `;
+      card.querySelector('.challenge-btn').addEventListener('click', () => {
+        this._sendChallenge(p);
+      });
+      container.appendChild(card);
+    });
+  }
+
+  // ─── Challenges ────────────────────────────────────────────────────────────
+  _sendChallenge(opponent) {
+    if (this.activeMatch) return;
+    this._lastChallengedSocketId = opponent.socketId;
+
+    const timeBtn = document.querySelector('.time-btn.active');
+    const seconds = parseInt(timeBtn?.dataset.seconds) || 180;
+    const increment = parseInt(timeBtn?.dataset.increment) || 0;
+
+    this.socket.emit('send_challenge', { 
+      targetSocketId: opponent.socketId,
+      color: this.selectedColor,
+      timeSeconds: seconds,
+      incrementSeconds: increment
+    });
+    // Show outgoing challenge modal
+    this._showChallengeModal(opponent.username, opponent.emoji, true);
+    this.board.playSynthSound('select');
+  }
+
+  _showChallengeModal(username, emoji, isOutgoing) {
+    const modal = document.getElementById('match-modal');
+    if (!modal) return;
+
+    document.getElementById('modal-title').innerText = isOutgoing ? 'Sending Challenge' : 'Incoming Challenge';
+    document.getElementById('modal-subtitle').innerText = isOutgoing
+      ? `Waiting for ${username} to respond...`
+      : `${username} wants to play you!`;
+
+    document.getElementById('modal-user-avatar').innerText = this.currentUser.emoji;
+    document.getElementById('modal-user-name').innerText = this.currentUser.username;
+    document.getElementById('modal-opponent-avatar').innerText = emoji;
+    document.getElementById('modal-opponent-name').innerText = username;
+
+    const acceptBtn = document.getElementById('modal-accept-btn');
+    const cancelBtn = document.getElementById('modal-cancel-btn');
+
+    if (isOutgoing) {
+      acceptBtn.style.display = 'none';
+      cancelBtn.innerText = 'Cancel';
+    } else {
+      acceptBtn.style.display = '';
+      cancelBtn.innerText = 'Decline';
+    }
+
+    modal.classList.remove('hidden');
+  }
+
+  _hideChallengeModal() {
+    const modal = document.getElementById('match-modal');
+    if (modal) modal.classList.add('hidden');
+    this.pendingChallenge = null;
+  }
+
+  // ─── Match Flow ────────────────────────────────────────────────────────────
+  _startMatch(color, opponent, timeSeconds, incrementSeconds) {
+    this.board.resetBoard();
+    this.board.setInteractable(true, color);
+    this.board.setOrientation(color);
+
+    this.incrementSeconds = incrementSeconds || 0;
+
+    // Hide any lingering modals
+    const overlay = document.getElementById('game-result-overlay');
+    if (overlay) overlay.classList.add('hidden');
+    const drawModal = document.getElementById('draw-modal');
+    if (drawModal) drawModal.classList.add('hidden');
+    this._hideChallengeModal();
+
+    // Hook up board callbacks
+    this.board.onMove = (fromRow, fromCol, toRow, toCol) => {
+      this.socket.emit('make_move', {
+        matchId: this.activeMatch.matchId,
+        fromRow, fromCol, toRow, toCol
+      });
+
+      // Apply increment
+      this.timers[this.board.playerColor] += this.incrementSeconds;
+      this._updateTimerDisplay();
+      
+      this._updateTurnIndicator();
+    };
+
+    this.board.onCheck = () => {
+      this._showStatusBanner('CHECK!');
+    };
+
+    this.board.onCheckmate = (winner) => {
+      this.socket.emit('game_over', {
+        matchId: this.activeMatch.matchId,
+        winner,
+        reason: winner === 'draw' ? 'stalemate' : 'checkmate'
+      });
+    };
+
+    // Update opponent profile panel
+    document.getElementById('opponent-name-display').innerText = opponent.username;
+    document.getElementById('opponent-avatar').innerHTML =
+      `<div class="avatar-placeholder">${opponent.emoji}</div>`;
+    document.getElementById('opponent-avatar').className = 'avatar-wrapper online';
+
+    // Toggle UI: Players list -> Chat
+    const lobbyPlayersView = document.getElementById('lobby-players-view');
+    const gameChatView = document.getElementById('game-chat-view');
+    const chatMessages = document.getElementById('chat-messages');
+
+    if (lobbyPlayersView) lobbyPlayersView.classList.add('hidden');
+    if (gameChatView) gameChatView.classList.remove('hidden');
+    if (chatMessages) chatMessages.innerHTML = '';
+
+    // Show action bar
+    document.getElementById('game-actions').classList.remove('hidden');
+
+    // Initialize Timers
+    const seconds = timeSeconds || 180;
+    this.timers = { white: seconds, black: seconds };
+    this._updateTimerDisplay();
+    this._startTimer();
+
+    // Update turn indicators
+    this._updateTurnIndicator();
+
+    this.board.playSynthSound('move');
+  }
+
+  _endMatch() {
+    this.activeMatch = null;
+    this.board.setInteractable(false);
+    this.board.onMove = null;
+    this.board.onCheck = null;
+    this.board.onCheckmate = null;
+
+    // Reset opponent panel
+    document.getElementById('opponent-name-display').innerText = 'Opponent';
+    document.getElementById('opponent-avatar').innerHTML = '<div class="avatar-placeholder">👤</div>';
+    document.getElementById('opponent-avatar').className = 'avatar-wrapper offline';
+
+    // Toggle UI: Chat -> Players list
+    const lobbyPlayersView = document.getElementById('lobby-players-view');
+    const gameChatView = document.getElementById('game-chat-view');
+    if (lobbyPlayersView) lobbyPlayersView.classList.remove('hidden');
+    if (gameChatView) gameChatView.classList.add('hidden');
+
+    // Hide action bar
+    document.getElementById('game-actions').classList.add('hidden');
+
+    // Stop Timers
+    clearInterval(this.timerInterval);
+
+    // Clear turn indicators
+    document.getElementById('user-timer').classList.remove('active');
+    document.getElementById('opponent-timer').classList.remove('active');
+    this._updateTimerDisplay();
+  }
+
+  // ─── Chat ──────────────────────────────────────────────────────────────────
+  _sendChatMessage() {
+    const input = document.getElementById('chat-input');
+    const msg = input.value.trim();
+    if (!msg || !this.activeMatch) return;
+
+    this.socket.emit('send_chat_message', {
+      matchId: this.activeMatch.matchId,
+      message: msg
+    });
+
+    this._appendChatMessage(msg, 'local');
+    input.value = '';
+    this.board.playSynthSound('move');
+  }
+
+  _appendChatMessage(message, type) {
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+
+    const msgEl = document.createElement('div');
+    msgEl.className = `chat-msg ${type}`;
+    msgEl.innerText = message;
+    container.appendChild(msgEl);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  _handleGameOver(winner, reason) {
+    const overlay = document.getElementById('game-result-overlay');
+    const title = document.getElementById('result-title');
+    const subtitle = document.getElementById('result-subtitle');
+
+    if (winner === 'draw') {
+      title.innerText = 'Draw';
+    } else {
+      title.innerText = winner === this.board.playerColor ? 'You Won!' : 'You Lost';
+    }
+
+    subtitle.innerText = reason.charAt(0).toUpperCase() + reason.slice(1).replace('_', ' ');
+    overlay.classList.remove('hidden');
+    
+    // Stop timers immediately
+    clearInterval(this.timerInterval);
+  }
+
+  _startTimer() {
+    clearInterval(this.timerInterval);
+    this.timerInterval = setInterval(() => {
+      const activeColor = this.board.activeTurn;
+      this.timers[activeColor]--;
+
+      if (this.timers[activeColor] <= 0) {
+        this.timers[activeColor] = 0;
+        clearInterval(this.timerInterval);
+        
+        // Timeout
+        if (activeColor === this.board.playerColor) {
+          this.socket.emit('game_over', {
+            matchId: this.activeMatch.matchId,
+            winner: activeColor === 'white' ? 'black' : 'white',
+            reason: 'timeout'
+          });
+        }
+      }
+      this._updateTimerDisplay();
+    }, 1000);
+  }
+
+  _updateTimerDisplay() {
+    if (!this.activeMatch) {
+      document.getElementById('user-timer').innerText = '—';
+      document.getElementById('opponent-timer').innerText = '—';
+      return;
+    }
+    const format = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+    
+    if (this.board.playerColor === 'white') {
+      document.getElementById('user-timer').innerText = format(this.timers.white);
+      document.getElementById('opponent-timer').innerText = format(this.timers.black);
+    } else {
+      document.getElementById('user-timer').innerText = format(this.timers.black);
+      document.getElementById('opponent-timer').innerText = format(this.timers.white);
+    }
+  }
+
+  _updateTurnIndicator() {
+    const isMyTurn = this.board.activeTurn === this.board.playerColor;
+    document.getElementById('user-timer').classList.toggle('active', isMyTurn);
+    document.getElementById('opponent-timer').classList.toggle('active', !isMyTurn);
+  }
+
+  // ─── Status Banner ─────────────────────────────────────────────────────────
+  _showStatusBanner(message) {
+    let banner = document.getElementById('status-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'status-banner';
+      document.body.appendChild(banner);
+    }
+    banner.innerText = message;
+    banner.classList.add('visible');
+    setTimeout(() => banner.classList.remove('visible'), 4000);
+  }
+
+  // ─── Event Bindings ────────────────────────────────────────────────────────
+  bindEvents() {
+    // Regen identity button
+    document.getElementById('regen-username-btn').addEventListener('click', () => {
+      if (!this.activeMatch) this.regenIdentity();
+    });
+
+    // Tab switching
+    const playTab = document.getElementById('tab-play');
+    const customTab = document.getElementById('tab-custom');
+    const playPanel = document.getElementById('panel-play');
+    const customPanel = document.getElementById('panel-custom');
+
+    playTab.addEventListener('click', () => {
+      playTab.classList.add('active');
+      customTab.classList.remove('active');
+      playPanel.classList.remove('hidden');
+      customPanel.classList.add('hidden');
+      this.board.playSynthSound('select');
+    });
+
+    customTab.addEventListener('click', () => {
+      customTab.classList.add('active');
+      playTab.classList.remove('active');
+      customPanel.classList.remove('hidden');
+      playPanel.classList.add('hidden');
+      this.board.playSynthSound('select');
+    });
+
+    // Board theme selector
+    const themeSelectBtns = document.querySelectorAll('.theme-select-btn');
+    themeSelectBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        themeSelectBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.board.setTheme(btn.dataset.boardTheme);
+        this.board.playSynthSound('move');
+      });
+    });
+
+    // Sidebar quick theme cycler
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+      const themes = ['green', 'wood', 'glass'];
+      const idx = (themes.indexOf(this.board.activeTheme) + 1) % themes.length;
+      const next = themes[idx];
+      themeSelectBtns.forEach(b => {
+        b.classList.toggle('active', b.dataset.boardTheme === next);
+      });
+      this.board.setTheme(next);
+      this.board.playSynthSound('move');
+    });
+
+    // Coordinates toggle
+    document.getElementById('coords-setting').addEventListener('change', (e) => {
+      this.board.setCoordinatesVisible(e.target.checked);
+    });
+
+    // Time control tabs
+    const timeTabBtns = document.querySelectorAll('.time-tab-btn');
+    const allTimeBtns = document.querySelectorAll('.time-btn');
+    timeTabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        timeTabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const cat = btn.dataset.category;
+        allTimeBtns.forEach(tb => {
+          tb.classList.toggle('hidden', !tb.classList.contains(`${cat}-time`));
+        });
+        const first = document.querySelector(`.time-btn.${cat}-time`);
+        if (first) { allTimeBtns.forEach(b => b.classList.remove('active')); first.classList.add('active'); }
+        this.board.playSynthSound('select');
+      });
+    });
+
+    allTimeBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        allTimeBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.board.playSynthSound('select');
+      });
+    });
+
+    // Variant selector (only enabled ones)
+    document.querySelectorAll('.variant-btn:not(.disabled)').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.variant-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.board.playSynthSound('select');
+      });
+    });
+
+    // Opponent search filter
+    const searchInput = document.getElementById('opponent-search-input');
+    if (searchInput) {
+      searchInput.addEventListener('input', (e) => {
+        const val = e.target.value.toLowerCase().trim();
+        const filtered = this.onlinePlayers.filter(p => p.username.toLowerCase().includes(val));
+        this._renderLobby(filtered);
+      });
+    }
+
+    // Challenge modal — Accept button
+    const acceptBtn = document.getElementById('modal-accept-btn');
+    if (acceptBtn) {
+      acceptBtn.addEventListener('click', () => {
+        if (this.pendingChallenge) {
+          this.socket.emit('challenge_response', {
+            fromSocketId: this.pendingChallenge.fromSocketId,
+            accepted: true,
+            color: this.pendingChallenge.requestedColor,
+            timeSeconds: this.pendingChallenge.timeSeconds,
+            incrementSeconds: this.pendingChallenge.incrementSeconds
+          });
+        }
+        this._hideChallengeModal();
+      });
+    }
+
+    // Challenge modal — Cancel/Decline button
+    const cancelBtn = document.getElementById('modal-cancel-btn');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        if (this.pendingChallenge) {
+          // Declining an incoming challenge
+          this.socket.emit('challenge_response', {
+            fromSocketId: this.pendingChallenge.fromSocketId,
+            accepted: false
+          });
+        } else {
+          // Cancelling an outgoing challenge
+          this.socket.emit('cancel_challenge', { 
+            targetSocketId: this._lastChallengedSocketId 
+          });
+        }
+        this._hideChallengeModal();
+        this.board.playSynthSound('move');
+      });
+    }
+
+    // Color Pickers
+    const colorPickBtns = document.querySelectorAll('.color-pick-btn');
+    colorPickBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        colorPickBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.selectedColor = btn.dataset.color;
+        this.board.playSynthSound('select');
+      });
+    });
+
+    // Action Bar
+    const resignBtn = document.getElementById('action-resign');
+    if (resignBtn) {
+      resignBtn.addEventListener('click', () => {
+        if (!this.activeMatch) return;
+        if (confirm('Are you sure you want to resign?')) {
+          this.socket.emit('resign', { matchId: this.activeMatch.matchId });
+        }
+      });
+    }
+
+    const drawBtn = document.getElementById('action-draw');
+    if (drawBtn) {
+      drawBtn.addEventListener('click', () => {
+        if (!this.activeMatch) return;
+        this.socket.emit('draw_offer', { matchId: this.activeMatch.matchId });
+        this._showStatusBanner('Draw offer sent.');
+      });
+    }
+
+    const flipBtn = document.getElementById('action-flip');
+    if (flipBtn) {
+      flipBtn.addEventListener('click', () => {
+        this.board.flipBoard();
+        this.board.playSynthSound('move');
+      });
+    }
+
+    // Result Overlay
+    const closeOverlayBtn = document.getElementById('result-close-btn');
+    if (closeOverlayBtn) {
+      closeOverlayBtn.addEventListener('click', () => {
+        const overlay = document.getElementById('game-result-overlay');
+        if (overlay) overlay.classList.add('hidden');
+        this._endMatch();
+      });
+    }
+
+    // Draw Modal Buttons
+    const drawAcceptBtn = document.getElementById('draw-accept-btn');
+    if (drawAcceptBtn) {
+      drawAcceptBtn.addEventListener('click', () => {
+        if (!this.activeMatch) return;
+        this.socket.emit('draw_response', { matchId: this.activeMatch.matchId, accepted: true });
+        document.getElementById('draw-modal').classList.add('hidden');
+      });
+    }
+
+    const drawDeclineBtn = document.getElementById('draw-decline-btn');
+    if (drawDeclineBtn) {
+      drawDeclineBtn.addEventListener('click', () => {
+        if (!this.activeMatch) return;
+        this.socket.emit('draw_response', { matchId: this.activeMatch.matchId, accepted: false });
+        document.getElementById('draw-modal').classList.add('hidden');
+      });
+    }
+
+    // Chat Events
+    const chatInput = document.getElementById('chat-input');
+    const chatSendBtn = document.getElementById('chat-send-btn');
+
+    if (chatSendBtn) {
+      chatSendBtn.addEventListener('click', () => this._sendChatMessage());
+    }
+
+    if (chatInput) {
+      chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          this._sendChatMessage();
+        }
+      });
+    }
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const app = new ChessApp();
+  app.init();
+});

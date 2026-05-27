@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YayChess</title>
+  <meta name="description" content="YayChess — Real-time online chess with stunning aesthetics and live multiplayer matchmaking.">
+  <meta name="theme-color" content="#161512">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Main Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Navigation Sidebar -->
+  <nav class="sidebar" id="sidebar-nav">
+    <div class="logo-container">
+      <span class="logo-text"><span class="logo-accent">Yay</span>Chess</span>
+    </div>
+
+    <div class="nav-links">
+      <a href="#" class="nav-item active" id="nav-play" title="Play">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+        </svg>
+        <span class="nav-label">Play</span>
+      </a>
+    </div>
+
+    <div class="nav-footer">
+      <button class="theme-toggle-btn" id="theme-toggle" title="Toggle Board Theme">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"></path>
+          <path d="M12 3v18"></path>
+          <path d="M12 7.5h6.5"></path>
+          <path d="M12 12h8.5"></path>
+          <path d="M12 16.5h6.5"></path>
+        </svg>
+        <span class="nav-label">Board Style</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Main Game Container -->
+  <main class="game-container">
+
+    <!-- Left Section: Chessboard and Player Info -->
+    <section class="board-column">
+
+      <!-- Top Player Profile (Opponent) -->
+      <div class="player-panel opponent" id="opponent-panel">
+        <div class="avatar-wrapper offline" id="opponent-avatar">
+          <div class="avatar-placeholder">👤</div>
+        </div>
+        <div class="player-details">
+          <span class="player-name" id="opponent-name-display">Opponent</span>
+        </div>
+        <div class="player-timer" id="opponent-timer">—</div>
+      </div>
+
+      <!-- Chess Board Container -->
+      <div class="chessboard-wrapper">
+        <div class="chessboard" id="chessboard">
+          <!-- Dynamically populated squares from board.js -->
+        </div>
+        <!-- Result Overlay -->
+        <div class="result-overlay hidden" id="game-result-overlay">
+          <div class="result-content">
+            <h2 id="result-title">Game Over</h2>
+            <p id="result-subtitle">Checkmate</p>
+            <button class="result-close-btn" id="result-close-btn">Return to Lobby</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- In-Game Action Bar -->
+      <div class="game-actions-bar hidden" id="game-actions">
+        <button class="action-btn" id="action-resign" title="Resign Match">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
+            <line x1="4" y1="22" x2="4" y2="15"></line>
+          </svg>
+          Resign
+        </button>
+        <button class="action-btn" id="action-draw" title="Offer Draw">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="8.5" cy="7" r="4"></circle>
+            <polyline points="17 11 19 13 23 9"></polyline>
+          </svg>
+          Draw
+        </button>
+        <button class="action-btn" id="action-flip" title="Flip Board View">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+          Flip
+        </button>
+      </div>
+
+      <!-- Bottom Player Profile (User) -->
+      <div class="player-panel user" id="user-panel">
+        <div class="avatar-wrapper online">
+          <div class="avatar-placeholder" id="user-avatar-placeholder">♟️</div>
+        </div>
+        <div class="player-details">
+          <span class="player-name" id="user-name-display">Loading...</span>
+          <span class="user-badge">YOU</span>
+        </div>
+        <div class="player-timer" id="user-timer">—</div>
+      </div>
+
+    </section>
+
+    <!-- Right Section: Controls Sidebar -->
+    <aside class="control-column">
+
+      <!-- User Session Card -->
+      <div class="user-session-card">
+        <div class="user-session-header">
+          <div class="user-session-meta">
+            <span class="session-dot active"></span>
+            <span class="session-title">Online — Guest Session</span>
+          </div>
+        </div>
+
+        <div class="user-session-profile">
+          <div class="profile-avatar" id="header-profile-avatar">🦊</div>
+          <div class="profile-info">
+            <h3 class="profile-username" id="header-username-display">Loading...</h3>
+            <p class="profile-status">Temporary identity</p>
+          </div>
+          <button class="regen-btn" id="regen-username-btn" title="Generate new identity">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Game Options Control Menu -->
+      <div class="menu-card">
+
+        <!-- Tab Headers -->
+        <div class="menu-tabs">
+          <button class="menu-tab-btn active" id="tab-play">
+            <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="6 3 20 12 6 21 6 3"></polygon>
+            </svg>
+            Play
+          </button>
+          <button class="menu-tab-btn" id="tab-custom">
+            <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            Settings
+          </button>
+        </div>
+
+        <!-- Dynamic Menu Panels -->
+        <div class="menu-content">
+
+          <!-- PLAY PANEL -->
+          <div class="menu-panel" id="panel-play">
+
+            <!-- Game Variant -->
+            <div class="menu-section">
+              <label class="section-label">Game Variant</label>
+              <div class="variant-grid">
+                <button class="variant-btn active" data-variant="standard">
+                  <span class="variant-icon">🏆</span>
+                  <div class="variant-info">
+                    <span class="variant-title">Standard Chess</span>
+                    <span class="variant-desc">Classic rules of chess</span>
+                  </div>
+                </button>
+                <button class="variant-btn disabled" data-variant="chess960" disabled>
+                  <span class="variant-icon">🎲</span>
+                  <div class="variant-info">
+                    <span class="variant-title">Chess960 (Coming Soon)</span>
+                    <span class="variant-desc">Randomized piece layout</span>
+                  </div>
+                </button>
+                <button class="variant-btn disabled" data-variant="threecheck" disabled>
+                  <span class="variant-icon">3️⃣</span>
+                  <div class="variant-info">
+                    <span class="variant-title">3-Check (Coming Soon)</span>
+                    <span class="variant-desc">Check 3 times to win</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Time Control -->
+            <div class="menu-section">
+              <label class="section-label">Time Control</label>
+              <div class="time-tabs">
+                <button class="time-tab-btn" data-category="bullet">Bullet</button>
+                <button class="time-tab-btn active" data-category="blitz">Blitz</button>
+                <button class="time-tab-btn" data-category="rapid">Rapid</button>
+              </div>
+              <div class="time-grid" id="time-selector-grid">
+                <button class="time-btn bullet-time hidden" data-time="1m" data-seconds="60">
+                  <span class="time-primary">1 min</span>
+                  <span class="time-secondary">Bullet</span>
+                </button>
+                <button class="time-btn bullet-time hidden" data-time="2|1" data-seconds="120" data-increment="1">
+                  <span class="time-primary">2 + 1</span>
+                  <span class="time-secondary">Bullet</span>
+                </button>
+                <button class="time-btn blitz-time active" data-time="3m" data-seconds="180">
+                  <span class="time-primary">3 min</span>
+                  <span class="time-secondary">Blitz</span>
+                </button>
+                <button class="time-btn blitz-time" data-time="3|2" data-seconds="180" data-increment="2">
+                  <span class="time-primary">3 + 2</span>
+                  <span class="time-secondary">Blitz</span>
+                </button>
+                <button class="time-btn blitz-time" data-time="5m" data-seconds="300">
+                  <span class="time-primary">5 min</span>
+                  <span class="time-secondary">Blitz</span>
+                </button>
+                <button class="time-btn rapid-time hidden" data-time="10m" data-seconds="600">
+                  <span class="time-primary">10 min</span>
+                  <span class="time-secondary">Rapid</span>
+                </button>
+                <button class="time-btn rapid-time hidden" data-time="15|10" data-seconds="900" data-increment="10">
+                  <span class="time-primary">15 + 10</span>
+                  <span class="time-secondary">Rapid</span>
+                </button>
+                <button class="time-btn rapid-time hidden" data-time="30m" data-seconds="1800">
+                  <span class="time-primary">30 min</span>
+                  <span class="time-secondary">Rapid</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Find Opponent (Online Players) -->
+            <div class="menu-section matchmaking-section">
+              
+              <!-- Lobby View: Online Players -->
+              <div id="lobby-players-view">
+                <label class="section-label">Online Players</label>
+                <div class="search-box-wrapper">
+                  <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" x2="16.65" y2="16.65"></line>
+                  </svg>
+                  <input type="text" id="opponent-search-input" placeholder="Search players..." autocomplete="off">
+                </div>
+
+                <!-- Color Selection -->
+                <div class="color-picker-row">
+                  <button class="color-pick-btn active" data-color="white" title="Play as White">
+                    <span class="color-icon">⚪</span>
+                  </button>
+                  <button class="color-pick-btn" data-color="random" title="Random Color">
+                    <span class="color-icon">❓</span>
+                  </button>
+                  <button class="color-pick-btn" data-color="black" title="Play as Black">
+                    <span class="color-icon">⚫</span>
+                  </button>
+                </div>
+
+                <div class="opponents-list" id="opponents-list-container">
+                  <!-- Populated by app.js via Socket.io -->
+                </div>
+              </div>
+
+              <!-- Match View: Game Chat -->
+              <div id="game-chat-view" class="hidden">
+                <label class="section-label">Game Chat</label>
+                <div class="chat-messages" id="chat-messages">
+                  <!-- Messages will appear here -->
+                </div>
+                <div class="chat-input-wrapper">
+                  <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                  <button id="chat-send-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="22" y1="2" x2="11" y2="13"></line>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
+          <!-- SETTINGS PANEL -->
+          <div class="menu-panel hidden" id="panel-custom">
+            <div class="menu-section">
+              <label class="section-label">Board Colors</label>
+              <div class="board-theme-grid">
+                <button class="theme-select-btn active" data-board-theme="green">
+                  <span class="theme-preview green-preview"></span>
+                  Classic Green
+                </button>
+                <button class="theme-select-btn" data-board-theme="wood">
+                  <span class="theme-preview wood-preview"></span>
+                  Warm Walnut
+                </button>
+                <button class="theme-select-btn" data-board-theme="glass">
+                  <span class="theme-preview glass-preview"></span>
+                  Dark Glass
+                </button>
+              </div>
+            </div>
+
+            <div class="menu-section">
+              <label class="section-label">Sound Effects</label>
+              <div class="setting-toggle">
+                <span>Play Sound on Moves</span>
+                <label class="switch">
+                  <input type="checkbox" id="sound-setting" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="menu-section">
+              <label class="section-label">Visual Aids</label>
+              <div class="setting-toggle">
+                <span>Highlight Valid Moves</span>
+                <label class="switch">
+                  <input type="checkbox" id="highlight-setting" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="setting-toggle">
+                <span>Show Square Coordinates</span>
+                <label class="switch">
+                  <input type="checkbox" id="coords-setting" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="menu-section info-section">
+              <p class="build-version">YayChess Beta v0.0.1</p>
+              <p class="developer-info">It's crazy what a little AI can dooo...</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- Challenge / Match Modal -->
+  <div class="modal-overlay hidden" id="match-modal">
+    <div class="challenge-card">
+      <div class="challenge-pulse-loader">
+        <div class="pulse-ring ring-1"></div>
+        <div class="pulse-ring ring-2"></div>
+        <div class="challenge-icon">⚔️</div>
+      </div>
+      <h2 class="challenge-status-title" id="modal-title">Sending Challenge</h2>
+      <p class="challenge-status-subtitle" id="modal-subtitle">Waiting for player response...</p>
+
+      <div class="challenge-meta-players">
+        <div class="meta-player">
+          <div class="meta-avatar" id="modal-user-avatar">♟️</div>
+          <span class="meta-name" id="modal-user-name">You</span>
+        </div>
+        <span class="vs-text">VS</span>
+        <div class="meta-player">
+          <div class="meta-avatar" id="modal-opponent-avatar">👤</div>
+          <span class="meta-name" id="modal-opponent-name">Opponent</span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="accept-challenge-btn" id="modal-accept-btn">Accept</button>
+        <button class="cancel-challenge-btn" id="modal-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Draw Offer Modal -->
+  <div class="modal-overlay hidden" id="draw-modal">
+    <div class="challenge-card">
+      <div class="challenge-icon">🤝</div>
+      <h2 class="challenge-status-title">Draw Offer</h2>
+      <p class="challenge-status-subtitle">Your opponent has proposed a draw.</p>
+      <div class="modal-actions">
+        <button class="accept-challenge-btn" id="draw-accept-btn">Accept Draw</button>
+        <button class="cancel-challenge-btn" id="draw-decline-btn">Decline</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Status Banner -->
+  <div id="status-banner"></div>
+
+  <!-- Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="board.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
