@@ -1,6 +1,6 @@
 {
   "name": "yaychess",
-  "version": "v0.0.1 Beta",
+  "version": "v1.0.0-p",
   "description": "It's a Chess interface where things are yeah...",
   "type": "module",
   "main": "src/server.js",
