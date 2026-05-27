@@ -58,11 +58,17 @@ class ChessApp {
     // Online lobby list (from server)
     this.onlinePlayers = [];
 
-    this.selectedColor = 'white';
+    this.selectedColor = 'random';
     this.timers = { white: 0, black: 0 };
     this.incrementSeconds = 0;
     this.timerInterval = null;
     this._lastChallengedSocketId = null;
+
+    this.pgnMoves = [];
+    this.chatLog = [];
+    this.matchTimeControl = { initial: 0, increment: 0 };
+    this.matchResult = '*';
+    this.matchTermination = 'unfinished';
   }
 
   init() {
@@ -152,6 +158,7 @@ class ChessApp {
       const opponentColor = this.board.playerColor === 'white' ? 'black' : 'white';
       this.timers[opponentColor] += this.incrementSeconds;
       this._updateTimerDisplay();
+      this._recordMoveMeta(this.board.getRawMoveHistory().slice(-1)[0]);
 
       this._updateTurnIndicator();
     });
@@ -159,6 +166,7 @@ class ChessApp {
     // Chat message received
     this.socket.on('chat_message_received', ({ message }) => {
       this._appendChatMessage(message, 'remote');
+      this._logChatMessage(this.activeMatch?.opponent.username || 'Opponent', message);
     });
 
     // Game over from server
@@ -292,6 +300,7 @@ class ChessApp {
       // Apply increment
       this.timers[this.board.playerColor] += this.incrementSeconds;
       this._updateTimerDisplay();
+      this._recordMoveMeta(this.board.getRawMoveHistory().slice(-1)[0]);
       this._updateMaterialDisplay();
       
       this._updateTurnIndicator();
@@ -320,6 +329,8 @@ class ChessApp {
 
     // Update materials constantly during the match
     this._updateMaterialDisplay();
+    this._setInGameExportEnabled(false);
+    this._setResultExportEnabled(false);
 
     // Update opponent profile panel
     document.getElementById('opponent-name-display').innerText = opponent.username;
@@ -338,6 +349,13 @@ class ChessApp {
 
     // Show action bar
     document.getElementById('game-actions').classList.remove('hidden');
+
+    // Initialize metadata tracking
+    this.pgnMoves = [];
+    this.chatLog = [];
+    this.matchTimeControl = { initial: timeSeconds || 180, increment: incrementSeconds || 0 };
+    this.matchResult = '*';
+    this.matchTermination = 'unfinished';
 
     // Initialize Timers
     const seconds = timeSeconds || 180;
@@ -371,6 +389,9 @@ class ChessApp {
 
     // Hide action bar
     document.getElementById('game-actions').classList.add('hidden');
+    this._setPlayerMaterialBadges(0, 0);
+    this._setInGameExportEnabled(false);
+    this._setResultExportEnabled(false);
 
     // Stop Timers
     clearInterval(this.timerInterval);
@@ -393,6 +414,7 @@ class ChessApp {
     });
 
     this._appendChatMessage(msg, 'local');
+    this._logChatMessage(this.currentUser.username, msg);
     input.value = '';
     this.board.playSynthSound('move');
   }
@@ -408,6 +430,13 @@ class ChessApp {
     container.scrollTop = container.scrollHeight;
   }
 
+  _logChatMessage(author, message) {
+    const historyLength = this.board?.getRawMoveHistory().length || 0;
+    const moveIndex = historyLength > 0 ? historyLength - 1 : null;
+    this.chatLog.push({ author, message, timestamp: new Date(), moveIndex });
+    return moveIndex;
+  }
+
   _handleGameOver(winner, reason) {
     const overlay = document.getElementById('game-result-overlay');
     const title = document.getElementById('result-title');
@@ -415,12 +444,18 @@ class ChessApp {
 
     if (winner === 'draw') {
       title.innerText = 'Draw';
+      this.matchResult = '1/2-1/2';
+      this.matchTermination = reason;
     } else {
       title.innerText = winner === this.board.playerColor ? 'You Won!' : 'You Lost';
+      this.matchResult = winner === 'white' ? '1-0' : '0-1';
+      this.matchTermination = reason;
     }
 
     subtitle.innerText = reason.charAt(0).toUpperCase() + reason.slice(1).replace('_', ' ');
     overlay.classList.remove('hidden');
+    this._setInGameExportEnabled(false);
+    this._setResultExportEnabled(true);
     
     // Stop timers immediately
     clearInterval(this.timerInterval);
@@ -479,41 +514,385 @@ class ChessApp {
     document.getElementById('opponent-timer').classList.toggle('active', !isMyTurn);
   }
 
+  _formatClock(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  _cloneGameState(state) {
+    return {
+      castling: {
+        whiteK: state.castling.whiteK,
+        whiteQ: state.castling.whiteQ,
+        blackK: state.castling.blackK,
+        blackQ: state.castling.blackQ
+      },
+      enPassantTarget: state.enPassantTarget,
+      halfMoveClock: state.halfMoveClock,
+      fullMoveNumber: state.fullMoveNumber
+    };
+  }
+
+  _createPgnTempBoard() {
+    const temp = {
+      boardState: [
+        ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'],
+        ['p', 'p', 'p', 'p', 'p', 'p', 'p', 'p'],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['', '', '', '', '', '', '', ''],
+        ['P', 'P', 'P', 'P', 'P', 'P', 'P', 'P'],
+        ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
+      ],
+      gameState: this._cloneGameState(this.board.gameState),
+      activeTurn: 'white'
+    };
+
+    ['calculateValidMoves', '_slidingMoves', 'isSquareAttackedBy', 'isKingInCheck', 'getLegalMovesForPiece', 'hasAnyLegalMove', '_positionToAlgebraic', '_algebraicToPosition']
+      .forEach(fn => {
+        temp[fn] = this.board[fn].bind(temp);
+      });
+
+    return temp;
+  }
+
+  _formatTimeControl(initial, increment) {
+    const base = initial % 60 === 0 ? `${initial / 60}` : `${initial}`;
+    return increment ? `${base}+${increment}` : base;
+  }
+
+  _escapePgnString(value) {
+    return String(value).replace(/"/g, '\\"');
+  }
+
+  _escapePgnComment(text) {
+    return String(text).replace(/}/g, ']');
+  }
+
+  _findSanDisambiguation(temp, move) {
+    const piece = move.piece.toUpperCase();
+    if (piece === 'P') return '';
+
+    const [targetRow, targetCol] = temp._algebraicToPosition(move.to);
+    const source = move.from;
+    const [sourceRow, sourceCol] = temp._algebraicToPosition(source);
+    const color = move.piece === move.piece.toUpperCase() ? 'white' : 'black';
+    const candidates = [];
+
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const pieceAt = temp.boardState[r][c];
+        if (!pieceAt) continue;
+        if (pieceAt.toUpperCase() !== piece) continue;
+        const isWhite = pieceAt === pieceAt.toUpperCase();
+        if ((isWhite ? 'white' : 'black') !== color) continue;
+        const fromSquare = temp._positionToAlgebraic(r, c);
+        if (fromSquare === source) continue;
+
+        const legalMoves = temp.getLegalMovesForPiece(r, c, pieceAt, temp.boardState);
+        if (legalMoves.some(m => m.r === targetRow && m.c === targetCol)) {
+          candidates.push({ row: r, col: c, square: fromSquare });
+        }
+      }
+    }
+
+    if (!candidates.length) return '';
+    const fileCollision = candidates.some(c => c.square[0] === source[0]);
+    const rankCollision = candidates.some(c => c.square[1] === source[1]);
+    if (fileCollision && rankCollision) return source;
+    if (fileCollision) return source[1];
+    return source[0];
+  }
+
+  _applyPgnMove(temp, move) {
+    const [fromRow, fromCol] = temp._algebraicToPosition(move.from);
+    const [toRow, toCol] = temp._algebraicToPosition(move.to);
+    const piece = temp.boardState[fromRow][fromCol];
+    const isWhite = piece === piece.toUpperCase();
+    const color = isWhite ? 'white' : 'black';
+    const opponent = color === 'white' ? 'black' : 'white';
+
+    if (move.enPassant) {
+      const captureRow = toRow + (isWhite ? 1 : -1);
+      temp.boardState[captureRow][toCol] = '';
+    }
+
+    if (move.castling) {
+      const kingRow = isWhite ? 7 : 0;
+      if (move.castling === 'O-O') {
+        temp.boardState[kingRow][6] = piece;
+        temp.boardState[kingRow][5] = temp.boardState[kingRow][7];
+        temp.boardState[kingRow][4] = '';
+        temp.boardState[kingRow][7] = '';
+      } else {
+        temp.boardState[kingRow][2] = piece;
+        temp.boardState[kingRow][3] = temp.boardState[kingRow][0];
+        temp.boardState[kingRow][4] = '';
+        temp.boardState[kingRow][0] = '';
+      }
+    } else {
+      temp.boardState[toRow][toCol] = move.promotion ? (isWhite ? move.promotion.toUpperCase() : move.promotion.toLowerCase()) : piece;
+      temp.boardState[fromRow][fromCol] = '';
+    }
+
+    if (piece.toLowerCase() === 'k') {
+      if (color === 'white') {
+        temp.gameState.castling.whiteK = false;
+        temp.gameState.castling.whiteQ = false;
+      } else {
+        temp.gameState.castling.blackK = false;
+        temp.gameState.castling.blackQ = false;
+      }
+    }
+    if (piece.toLowerCase() === 'r') {
+      if (color === 'white' && fromRow === 7 && fromCol === 7) temp.gameState.castling.whiteK = false;
+      if (color === 'white' && fromRow === 7 && fromCol === 0) temp.gameState.castling.whiteQ = false;
+      if (color === 'black' && fromRow === 0 && fromCol === 7) temp.gameState.castling.blackK = false;
+      if (color === 'black' && fromRow === 0 && fromCol === 0) temp.gameState.castling.blackQ = false;
+    }
+
+    if (move.capture && !move.enPassant) {
+      const capturedPiece = temp.boardState[toRow][toCol];
+      if (capturedPiece?.toLowerCase() === 'r') {
+        if (toRow === 7 && toCol === 7) temp.gameState.castling.whiteK = false;
+        if (toRow === 7 && toCol === 0) temp.gameState.castling.whiteQ = false;
+        if (toRow === 0 && toCol === 7) temp.gameState.castling.blackK = false;
+        if (toRow === 0 && toCol === 0) temp.gameState.castling.blackQ = false;
+      }
+    }
+
+    if (piece.toLowerCase() === 'p' && Math.abs(toRow - fromRow) === 2) {
+      temp.gameState.enPassantTarget = temp._positionToAlgebraic((fromRow + toRow) / 2, fromCol);
+    } else {
+      temp.gameState.enPassantTarget = null;
+    }
+
+    if (!isWhite) temp.gameState.fullMoveNumber += 1;
+    temp.activeTurn = opponent;
+  }
+
+  _getSan(move, temp) {
+    if (!move) return '';
+    if (move.castling) return move.castling;
+
+    const piece = move.piece.toUpperCase();
+    const isPawn = piece === 'P';
+    const capture = move.capture;
+    let san = '';
+
+    if (isPawn) {
+      if (capture) {
+        san = `${move.from[0]}x${move.to}`;
+      } else {
+        san = move.to;
+      }
+      if (move.promotion) {
+        san += `=${move.promotion.toUpperCase()}`;
+      }
+    } else {
+      const disambiguation = this._findSanDisambiguation(temp, move);
+      san = `${piece}${disambiguation}${capture ? 'x' : ''}${move.to}`;
+    }
+
+    const simulated = {
+      boardState: temp.boardState.map(row => [...row]),
+      gameState: this._cloneGameState(temp.gameState),
+      activeTurn: temp.activeTurn
+    };
+    ['calculateValidMoves', '_slidingMoves', 'isSquareAttackedBy', 'isKingInCheck', 'getLegalMovesForPiece', 'hasAnyLegalMove', '_positionToAlgebraic', '_algebraicToPosition']
+      .forEach(fn => { simulated[fn] = this.board[fn].bind(simulated); });
+    this._applyPgnMove(simulated, move);
+
+    const opponent = simulated.activeTurn;
+    if (simulated.isKingInCheck(opponent, simulated.boardState)) {
+      const isMate = !simulated.hasAnyLegalMove(opponent, simulated.boardState);
+      san += isMate ? '#' : '+';
+    }
+
+    return san;
+  }
+
+  _recordMoveMeta(move) {
+    const moveColor = move.piece === move.piece.toUpperCase() ? 'white' : 'black';
+    const clock = this._formatClock(this.timers[moveColor]);
+    this.pgnMoves.push({ move, color: moveColor, clock });
+  }
+
+  _formatMaterialBadge(value) {
+    if (value === 0) return '0';
+    return value > 0 ? `+${value}` : `${value}`;
+  }
+
+  _setPlayerMaterialBadges(whiteDiff, blackDiff) {
+    const userBadge = document.getElementById('user-material');
+    const opponentBadge = document.getElementById('opponent-material');
+    const isWhite = this.board.playerColor === 'white';
+    if (userBadge) {
+      userBadge.innerText = this._formatMaterialBadge(isWhite ? whiteDiff : blackDiff);
+      userBadge.classList.toggle('hidden', !this.activeMatch);
+    }
+    if (opponentBadge) {
+      opponentBadge.innerText = this._formatMaterialBadge(isWhite ? blackDiff : whiteDiff);
+      opponentBadge.classList.toggle('hidden', !this.activeMatch);
+    }
+  }
+
+  _setInGameExportEnabled(enabled) {
+    const exportPgnBtn = document.getElementById('action-export-pgn');
+    const exportFenBtn = document.getElementById('action-export-fen');
+    if (exportPgnBtn) {
+      exportPgnBtn.disabled = !enabled;
+      exportPgnBtn.classList.toggle('hidden', !enabled);
+    }
+    if (exportFenBtn) {
+      exportFenBtn.disabled = !enabled;
+      exportFenBtn.classList.toggle('hidden', !enabled);
+    }
+  }
+
+  _setResultExportEnabled(enabled) {
+    const exportPgnBtn = document.getElementById('result-export-pgn');
+    const exportFenBtn = document.getElementById('result-export-fen');
+    if (exportPgnBtn) exportPgnBtn.disabled = !enabled;
+    if (exportFenBtn) exportFenBtn.disabled = !enabled;
+  }
+
   _updateMaterialDisplay() {
+    const panel = document.getElementById('material-panel');
     if (!this.activeMatch) {
-      document.getElementById('material-panel')?.classList.add('hidden');
+      panel?.classList.add('hidden');
+      this._setPlayerMaterialBadges(0, 0);
       return;
     }
+
     const material = this.board.getMaterialScore();
     const whiteEl = document.getElementById('material-white');
     const blackEl = document.getElementById('material-black');
-    const panel = document.getElementById('material-panel');
+    const diff = material.white - material.black;
     if (whiteEl) whiteEl.innerText = `White: ${material.white}`;
     if (blackEl) blackEl.innerText = `Black: ${material.black}`;
     panel?.classList.remove('hidden');
+
+    this._setPlayerMaterialBadges(diff, -diff);
   }
 
-  _formatMoveNotation(move) {
-    if (!move) return '';
-    if (move.castling) return move.castling;
-    const piece = move.piece.toLowerCase() === 'p' ? '' : move.piece.toUpperCase();
-    const capture = move.capture ? 'x' : '';
-    const promo = move.promotion ? `=${move.promotion}` : '';
-    return `${piece}${move.from}${capture}${move.to}${promo}`;
+  _formatTagValue(value) {
+    return String(value)
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"');
+  }
+
+  _renderPgnTag(tag, value) {
+    return `[${tag} "${this._formatTagValue(value)}"]`;
+  }
+
+  _escapePgnComment(value) {
+    return String(value)
+      .replace(/\\/g, '\\\\')
+      .replace(/\}/g, '\\}');
+  }
+
+  _formatPgnComment(clock) {
+    return clock ? ` {[%clk ${clock}]}` : '';
+  }
+
+  _formatChatComment(entry) {
+    return `{${this._escapePgnComment(`${entry.author}: ${entry.message}`)}}`;
+  }
+
+  _formatPgnMoveText(moves) {
+    if (!moves.length) return '';
+    const tokens = [];
+    const temp = this._createPgnTempBoard();
+
+    for (let i = 0; i < moves.length; i += 2) {
+      const moveNumber = Math.floor(i / 2) + 1;
+      const whiteMeta = moves[i];
+      const blackMeta = moves[i + 1];
+
+      const whiteSan = whiteMeta && whiteMeta.move ? this._getSan(whiteMeta.move, temp) : '';
+      const blackSan = blackMeta && blackMeta.move ? this._getSan(blackMeta.move, temp) : '';
+      const whiteClock = whiteMeta ? this._formatPgnComment(whiteMeta.clock) : '';
+      const blackClock = blackMeta ? this._formatPgnComment(blackMeta.clock) : '';
+      const pairComments = this.chatLog
+        .filter(entry => entry.moveIndex === i || entry.moveIndex === i + 1)
+        .map(entry => this._formatChatComment(entry))
+        .join(' ');
+
+      tokens.push(`${moveNumber}. ${whiteSan}${whiteClock}${blackMeta ? ` ${blackSan}${blackClock}` : ''}`);
+
+      if (whiteMeta && whiteMeta.move) this._applyPgnMove(temp, whiteMeta.move);
+      if (blackMeta && blackMeta.move) this._applyPgnMove(temp, blackMeta.move);
+
+      if (pairComments) {
+        tokens[tokens.length - 1] += ` ${pairComments}`;
+      }
+    }
+    return this._wrapPgnLines(tokens.join(' '));
+  }
+
+  _wrapPgnLines(text) {
+    const maxLength = 80;
+    const words = text.split(' ');
+    let line = '';
+    const lines = [];
+    words.forEach(word => {
+      if (line.length + word.length + 1 > maxLength && line.length > 0) {
+        lines.push(line.trim());
+        line = '';
+      }
+      line += (line.length ? ' ' : '') + word;
+    });
+    if (line.length) lines.push(line.trim());
+    return lines.join('\n');
   }
 
   _generatePgn() {
     const history = this.board.getRawMoveHistory();
-    const lines = [];
-    for (let i = 0; i < history.length; i += 2) {
-      const moveNumber = Math.floor(i / 2) + 1;
-      const whiteMove = this._formatMoveNotation(history[i]);
-      const blackMove = history[i + 1] ? this._formatMoveNotation(history[i + 1]) : '';
-      lines.push(`${moveNumber}. ${whiteMove}${blackMove ? ' ' + blackMove : ''}`);
-    }
-    const whiteName = this.activeMatch?.color === 'white' ? this.currentUser.username : this.activeMatch?.opponent.username || 'Opponent';
-    const blackName = this.activeMatch?.color === 'black' ? this.currentUser.username : this.activeMatch?.opponent.username || 'Opponent';
-    return `[Event "YayChess"]\n[Site "Local"]\n[Date "${new Date().toISOString().slice(0,10)}"]\n[White "${whiteName}"]\n[Black "${blackName}"]\n[Result "*"]\n\n${lines.join(' ')}\n`;
+    const moves = this.pgnMoves.length === history.length
+      ? this.pgnMoves
+      : history.map(move => ({ move, color: move.piece === move.piece.toUpperCase() ? 'white' : 'black', clock: '' }));
+
+    const tagWhite = this.activeMatch?.color === 'white' ? this.currentUser.username : this.activeMatch?.opponent.username || 'Opponent';
+    const tagBlack = this.activeMatch?.color === 'black' ? this.currentUser.username : this.activeMatch?.opponent.username || 'Opponent';
+    const result = this.matchResult || '*';
+    const termination = this.matchTermination.replace(/_/g, ' ');
+    const now = new Date();
+    const dateTag = now.toISOString().slice(0, 10).replace(/-/g, '.');
+    const utcDate = dateTag;
+    const utcTime = now.toISOString().slice(11, 19);
+    const timeControl = this._formatTimeControl(this.matchTimeControl.initial, this.matchTimeControl.increment);
+    const comments = this.chatLog
+      .filter(entry => entry.moveIndex === null)
+      .map(entry => this._formatChatComment(entry))
+      .join(' ');
+
+    const tags = [
+      this._renderPgnTag('Event', 'YayChess Online Match'),
+      this._renderPgnTag('Site', 'YayChess'),
+      this._renderPgnTag('Date', dateTag),
+      this._renderPgnTag('UTCDate', utcDate),
+      this._renderPgnTag('UTCTime', utcTime),
+      this._renderPgnTag('Round', '?'),
+      this._renderPgnTag('White', tagWhite),
+      this._renderPgnTag('Black', tagBlack),
+      this._renderPgnTag('Result', result),
+      this._renderPgnTag('TimeControl', timeControl),
+      this._renderPgnTag('Termination', termination),
+      this._renderPgnTag('Annotator', 'YayChess')
+    ].join('\n');
+
+    const movetext = this._formatPgnMoveText(moves);
+    const gameText = movetext.length ? `${movetext} ${result}` : result;
+    const commentText = comments ? `\n\n${comments}` : '';
+
+    return `${tags}\n\n${gameText}${commentText}\n`;
   }
 
   _downloadTextFile(filename, contents) {
@@ -752,6 +1131,20 @@ class ChessApp {
         const overlay = document.getElementById('game-result-overlay');
         if (overlay) overlay.classList.add('hidden');
         this._endMatch();
+      });
+    }
+
+    const resultExportPgnBtn = document.getElementById('result-export-pgn');
+    if (resultExportPgnBtn) {
+      resultExportPgnBtn.addEventListener('click', () => {
+        this._downloadPgn();
+      });
+    }
+
+    const resultExportFenBtn = document.getElementById('result-export-fen');
+    if (resultExportFenBtn) {
+      resultExportFenBtn.addEventListener('click', () => {
+        this._downloadFen();
       });
     }
 

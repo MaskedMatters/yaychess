@@ -57,6 +57,7 @@
         </div>
         <div class="player-details">
           <span class="player-name" id="opponent-name-display">Opponent</span>
+          <span class="player-material-badge hidden" id="opponent-material">0</span>
         </div>
         <div class="player-timer" id="opponent-timer">—</div>
       </div>
@@ -71,6 +72,10 @@
           <div class="result-content">
             <h2 id="result-title">Game Over</h2>
             <p id="result-subtitle">Checkmate</p>
+            <div class="result-controls">
+              <button class="action-btn small" id="result-export-pgn" disabled>Download PGN</button>
+              <button class="action-btn small" id="result-export-fen" disabled>Download FEN</button>
+            </div>
             <button class="result-close-btn" id="result-close-btn">Return to Lobby</button>
           </div>
         </div>
@@ -129,6 +134,7 @@
         <div class="player-details">
           <span class="player-name" id="user-name-display">Loading...</span>
           <span class="user-badge">YOU</span>
+          <span class="player-material-badge hidden" id="user-material">0</span>
         </div>
         <div class="player-timer" id="user-timer">—</div>
       </div>
@@ -275,10 +281,10 @@
 
                 <!-- Color Selection -->
                 <div class="color-picker-row">
-                  <button class="color-pick-btn active" data-color="white" title="Play as White">
+                  <button class="color-pick-btn" data-color="white" title="Play as White">
                     <span class="color-icon">⚪</span>
                   </button>
-                  <button class="color-pick-btn" data-color="random" title="Random Color">
+                  <button class="color-pick-btn active" data-color="random" title="Random Color">
                     <span class="color-icon">❓</span>
                   </button>
                   <button class="color-pick-btn" data-color="black" title="Play as Black">

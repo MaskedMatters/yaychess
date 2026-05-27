@@ -311,7 +311,7 @@ body {
   font-weight: 500;
 }
 
-.user-badge {
+..user-badge {
   font-size: 0.65rem;
   background: var(--color-green-soft);
   color: var(--color-green-hover);
@@ -321,8 +321,39 @@ body {
   letter-spacing: 0.5px;
 }
 
-.player-timer {
-  font-family: 'Outfit', monospace;
+.player-material-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+    min-width: 42px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--color-text-bright);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    line-height: 1.1;
+  }
+
+  .action-btn:disabled,
+  button:disabled.action-btn {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  .result-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 12px 0;
+  }
+
+  .action-btn.small {
+    min-width: auto;
+    padding: 10px 12px;
+    font-size: 0.82rem;
   font-size: 1.25rem;
   font-weight: 700;
   color: var(--color-text-muted);
@@ -963,26 +994,30 @@ body {
 /* Game Actions Bar */
 .game-actions-bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   width: 100%;
   max-width: min(calc(100vh - 180px), 640px);
   margin: 8px 0;
   transition: all var(--transition-normal);
+  align-items: stretch;
 }
 
 
 .action-btn {
-  flex: 1;
+  flex: 1 1 120px;
+  min-width: 120px;
+  min-height: 44px;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   color: var(--color-text-normal);
-  padding: 10px;
+  padding: 12px 14px;
   border-radius: var(--radius-md);
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;

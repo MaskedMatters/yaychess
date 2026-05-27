@@ -1,0 +1,198 @@
+Numeric Annotation Glyphs (NAGs)
+Numeric Annotation Glyphs or NAGs are used to annotate chess games when using a computer, typically providing an assessment of a chess move or a chess position. NAGs exist to indicate a simple annotation in a language independent manner. NAGs were first formally documented in 1994 by Steven J. Edwards in his "Portable Game Notation Specification and Implementation Guide".[5]
+
+Within the PGN specification, 256 NAGs are proposed, of which the first 140 values have been defined; the remaining 116 values are reserved for future definition.[1]: §10 
+
+A Numeric Annotation Glyph is composed of a dollar sign character ("$") immediately followed by one or more digit characters. Each NAG then has a specific meaning and often a standard typographical representation. The meanings first defined stemmed from the use of specific typographic symbols when annotators were commenting upon chess games; most especially in Chess Informant[6] publications. The objective was to devise an alternative representation of these symbols which could be incorporated in the simple computer file format proposed as the PGN standard. This mechanism allowed often sophisticated typography to be expressed using the simple ASCII character set.[original research?]
+
+Since its inception there has been no attempt to further formalise or standardise the meaning of the undefined 116 NAGs, although some PGN editors, such as ChessPad, have variously used these higher glyphs by assigning non-standard custom definitions.[citation needed]
+
+NAG Groupings
+NAG range	Classification
+$0	provided for the convenience of software designers as a placeholder value;
+should not appear in PGN files and has no typographic representation
+
+$1-$9	Move assessments
+$10-$135	Positional Assessments
+$136-$139	Time Pressure Commentaries
+$140+	not defined
+Standard NAGs
+NAG	Meaning	Symbol	Unicode[7]	HTML[8]	Name
+$0	null annotation				
+$1	good move (traditional "!") see also Nunn Convention for alternate meanings	!	U+0021	&excl;	single exclamation mark
+$2	poor move or mistake (traditional "?") (and Nunn Convention)	?	U+003F	&quest;	single question mark
+$3	very good or brilliant move (traditional "!!") (and Nunn Convention)	‼	U+203C		double exclamation mark
+$4	very poor move or blunder (traditional "??") (and Nunn Convention)	⁇	U+2047		double question mark
+$5	speculative or interesting move (traditional "!?") (and Nunn Convention)	⁉	U+2049		exclamation question mark
+$6	questionable or dubious move (traditional "?!") (and Nunn Convention)	⁈	U+2048		question mark and exclamation mark
+$7	forced move (all others lose quickly) or only move	□	U+25A1	&square;	white square
+$8	singular move (no reasonable alternatives)	
+$9	worst move	
+$10	drawish position or even	=	U+003D	&equals;	equal sign
+$11	equal chances, quiet position	
+$12	equal chances, active position	
+$13	unclear position	∞	U+221E	&infin;	infinity
+$14	White has a slight advantage	⩲	U+2A72	&pluse;	plus sign above equals sign
+$15	Black has a slight advantage	⩱	U+2A71	&eplus;	equals sign above plus sign
+$16	White has a moderate advantage	±	U+00B1	&plusmn;	plus-minus sign
+$17	Black has a moderate advantage	∓	U+2213	&mnplus;	minus-or-plus sign
+$18	White has a decisive advantage	+ −	U+002B U+002D	&plus; &#45;[a]	plus sign, hyphen-minus sign
+$19	Black has a decisive advantage	− +	U+002D U+002B	&#45; &plus;	hyphen-minus sign, plus sign
+$20	White has a crushing advantage (Black should resign)	
+$21	Black has a crushing advantage (White should resign)	
+$22	White is in zugzwang	⨀	U+2A00	&xodot;	N-ary circled dot operator
+$23	Black is in zugzwang
+$24	White has a slight space advantage	
+$25	Black has a slight space advantage	
+$26	White has a moderate space advantage	○	U+25CB	&#x25cb;	White circle
+$27	Black has a moderate space advantage
+$28	White has a decisive space advantage	
+$29	Black has a decisive space advantage	
+$30	White has a slight time (development) advantage	
+$31	Black has a slight time (development) advantage	
+$32	White has a moderate time (development) advantage	⟳	U+27F3		clockwise gapped circle arrow
+$33	Black has a moderate time (development) advantage
+$34	White has a decisive time (development) advantage	
+$35	Black has a decisive time (development) advantage	
+$36	White has the initiative	↑	U+2191	&uarr;	upwards arrow
+$37	Black has the initiative
+$38	White has a lasting initiative	
+$39	Black has a lasting initiative	
+$40	White has the attack	→	U+2192	&rarr;	rightwards arrow
+$41	Black has the attack
+$42	White has insufficient compensation for material deficit	
+$43	Black has insufficient compensation for material deficit	
+$44	White has sufficient compensation for material deficit	⯹	U+2BF9[9]	&#x2bf9;	equals sign with infinity below
+$45	Black has sufficient compensation for material deficit
+$46	White has more than adequate compensation for material deficit	
+$47	Black has more than adequate compensation for material deficit	
+$48	White has a slight center control advantage	
+$49	Black has a slight center control advantage	
+$50	White has a moderate center control advantage	
+$51	Black has a moderate center control advantage	
+$52	White has a decisive center control advantage	
+$53	Black has a decisive center control advantage	
+$54	White has a slight kingside control advantage	
+$55	Black has a slight kingside control advantage	
+$56	White has a moderate kingside control advantage	
+$57	Black has a moderate kingside control advantage	
+$58	White has a decisive kingside control advantage	
+$59	Black has a decisive kingside control advantage	
+$60	White has a slight queenside control advantage	
+$61	Black has a slight queenside control advantage	
+$62	White has a moderate queenside control advantage	
+$63	Black has a moderate queenside control advantage	
+$64	White has a decisive queenside control advantage	
+$65	Black has a decisive queenside control advantage	
+$66	White has a vulnerable first rank	
+$67	Black has a vulnerable first rank	
+$68	White has a well protected first rank	
+$69	Black has a well protected first rank	
+$70	White has a poorly protected king	
+$71	Black has a poorly protected king	
+$72	White has a well protected king	
+$73	Black has a well protected king	
+$74	White has a poorly placed king	
+$75	Black has a poorly placed king	
+$76	White has a well placed king	
+$77	Black has a well placed king	
+$78	White has a very weak pawn structure	
+$79	Black has a very weak pawn structure	
+$80	White has a moderately weak pawn structure	
+$81	Black has a moderately weak pawn structure	
+$82	White has a moderately strong pawn structure	
+$83	Black has a moderately strong pawn structure	
+$84	White has a very strong pawn structure	
+$85	Black has a very strong pawn structure	
+$86	White has poor knight placement	
+$87	Black has poor knight placement	
+$88	White has good knight placement	
+$89	Black has good knight placement	
+$90	White has poor bishop placement	
+$91	Black has poor bishop placement	
+$92	White has good bishop placement	
+$93	Black has good bishop placement	
+$94	White has poor rook placement	
+$95	Black has poor rook placement	
+$96	White has good rook placement	
+$97	Black has good rook placement	
+$98	White has poor queen placement	
+$99	Black has poor queen placement	
+$100	White has good queen placement	
+$101	Black has good queen placement	
+$102	White has poor piece coordination	
+$103	Black has poor piece coordination	
+$104	White has good piece coordination	
+$105	Black has good piece coordination	
+$106	White has played the opening very poorly	
+$107	Black has played the opening very poorly	
+$108	White has played the opening poorly	
+$109	Black has played the opening poorly	
+$110	White has played the opening well	
+$111	Black has played the opening well	
+$112	White has played the opening very well	
+$113	Black has played the opening very well	
+$114	White has played the middlegame very poorly	
+$115	Black has played the middlegame very poorly	
+$116	White has played the middlegame poorly	
+$117	Black has played the middlegame poorly	
+$118	White has played the middlegame well	
+$119	Black has played the middlegame well	
+$120	White has played the middlegame very well	
+$121	Black has played the middlegame very well	
+$122	White has played the ending very poorly	
+$123	Black has played the ending very poorly	
+$124	White has played the ending poorly	
+$125	Black has played the ending poorly	
+$126	White has played the ending well	
+$127	Black has played the ending well	
+$128	White has played the ending very well	
+$129	Black has played the ending very well	
+$130	White has slight counterplay	
+$131	Black has slight counterplay	
+$132	White has moderate counterplay	⇆	U+21C6	&lrarr;	leftwards arrow over rightwards arrow
+$133	Black has moderate counterplay
+$134	White has decisive counterplay	
+$135	Black has decisive counterplay	
+$136	White has moderate time control pressure	
+$137	Black has moderate time control pressure	
+$138	White has severe time control pressure / zeitnot	⨁	U+2A01	&xoplus;	n-ary circle plus operator
+$139	Black has severe time control pressure / zeitnot
+Non-standard NAGs
+NAG	Used by	Meaning	Symbol	Unicode[7]	HTML[8]	Name
+$140	ChessPad[10]	With the idea...	∆	U+2206		increment
+$141	ChessPad[10]	Aimed against...	∇	U+2207		nabla
+$142	ChessPad[10]	Better is...	⌓	U+2313	&profsurf;	segment
+$143	ChessPad[10]	Worse is...	<=			less than, equal to
+$144	ChessPad[10]	Equivalent is...	==			equal to, equal to
+$145	ChessPad[10]	Editorial comment	RR			capital R, capital R
+$146	ChessPad[10]	Novelty	N			capital N
+$147	arslanovchess.com	A rare, non-standard, hard to find brilliant move	!!!			triple exclamation mark
+$148	arslanovchess.com	Objectively dubious, but practically dangerous — the refutation isn't easy to find, and failure to do so often leads to a swift defeat.	!??			exclamation double question mark
+$149–$219		Not defined		
+$220	ChessPad[10]	Diagram	⬒ (UI only)			
+$221	ChessPad[10]	Diagram (from Black)	⬓ (UI only)			
+$222–$237		Not defined
+$238	ChessPad[10]	Space advantage	○	U+25CB	&cir;	white circle
+$239	ChessPad[10]	File (columns on the chessboard labeled a-h)	⇔	U+21D4	&hArr;	left right double arrow
+$240	ChessPad[10]	Diagonal	⇗	U+21D7	&neArr;	north east double arrow
+$241	ChessPad[10]	Centre	⊞	U+229E	&boxplus;	squared plus
+$242	ChessPad[10]	King-side	⟫	U+27EB	&Rang;	right double angle bracket
+$243	ChessPad[10]	Queen-side	⟪	U+27EA	&Lang;	left double angle bracket
+$244	ChessPad[10]	Weak point	✕	U+2715		multiplication x
+$245	ChessPad[10]	Ending	⊥	U+22A5	&perp;	up tack
+$246	ChessPad[10]	Bishop pair	CA Chess font: white square with white square to northeast
+$247	ChessPad[10]	Opposite Bishops	CA Chess font: white square with black square to northeast
+$248	ChessPad[10]	Same Bishops	CA Chess font: black square with black square to northeast
+$249	ChessPad[10]	Connected pawns	⯺	U+2BFA[9]	&#x2bfa;	united symbol
+$250	ChessPad[10]	Isolated pawns	⯻	U+2BFB[9]	&#x2bfb;	separated symbol
+$251	ChessPad[10]	Doubled pawns	⯼	U+2BFC[9]	&#x2bfc;	doubled symbol
+$252	ChessPad[10]	Passed pawn	⯽	U+2BFD[9]	&#x2bfd;	passed symbol
+$253	ChessPad[10]	Pawn majority	text
+$254	ChessPad[10]	With	∟	U+221F[9]	&#x221f;	right angle
+$255	ChessPad[10]	Without	⯾	U+2BFE[9]	&#x2bfe;	reversed right angle
+Notes on tables
+Some of the symbols are not rendered by some browsers
+The more exotic symbols used by Chess Informator[6] are often derived from common mathematical typographic symbols; their mathematical meaning rarely has any relevance to their chess meaning
+The entries in the Unicode column are, respectively, the decimal and hexadecimal reference for the character or symbol
+The entries in the HTML column are named HTML entities for representing the symbol or character; the Unicode numeric value can always be used where a specific entity does not exist. For example, the left right double arrow ($239) can be represented as either Unicode decimal &#8660; (⇔) or Unicode hexadecimal &#x21D4; (⇔) or HTML &hArr; (⇔). Unless explicitly noted, the Unicode representation can be interpreted as a default.

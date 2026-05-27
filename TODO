@@ -1,16 +1,19 @@
+COMPLETED:
 - ADD CASTLING
 - ADD 50 MOVE RULE
 - ADD EN PASSANT
 - MAKE COLOURED TIMERs (when running out of time, audio queue as well)
+- ADD MATERIAL COUNTING/INDICATION
+The material indicator's should be shown as a badge type thing next to both player's usernames. The badge will say 0 for both players when it is even, when one player has more material it will show the difference as +3 for example. Then the player with less material will see -3, right? Okay, you do that.
+- ADD PGN & FEN DOWNLOAD
+PGN and FEN downloads should not be available to download while the game is happening. When the game is terminated due to a loss/win or draw, there should be an option to download the game's PGN and FEN on the won/lost popup. 
 
+IN PIPELINE:
 - ADD MORE PROMOTION OPTIONS
 
-- ADD MATERIAL COUNTING/INDICATION
-A more in-depth explanation...
+NEEDS FIXING/CLARIFICATION:
 
-- ADD PGN & FEN DOWNLOAD
-A more in-depth explanation...
-
+IN FURTHER PIPELINE:
 - ADD LIAM's CHESS^2
 - ADD ANALYSIS TAB
 - ADD ACCOUNT AUTHENTICATION (w/ GAME HISTORY)
