@@ -4,6 +4,13 @@ FROM node:24-alpine
 # Set the working directory inside the container
 WORKDIR /usr/src/app
 
+# OCI Image Labels
+LABEL org.opencontainers.image.title="YayChess" \
+    org.opencontainers.image.description="It's a Chess interface where things are yeah..." \
+    org.opencontainers.image.source="https://github.com/MaskedMatters/yaychess" \
+    org.opencontainers.image.authors="MaskedMatters" \
+    org.opencontainers.image.licenses="MIT"
+
 # Copy package files first to leverage Docker layer caching
 COPY package*.json ./
 
