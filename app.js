@@ -146,6 +146,7 @@ class ChessApp {
     // Incoming move from opponent
     this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol }) => {
       this.board.executeMove(fromRow, fromCol, toRow, toCol, false);
+      this._updateMaterialDisplay();
 
       // Apply increment to opponent
       const opponentColor = this.board.playerColor === 'white' ? 'black' : 'white';
@@ -291,6 +292,7 @@ class ChessApp {
       // Apply increment
       this.timers[this.board.playerColor] += this.incrementSeconds;
       this._updateTimerDisplay();
+      this._updateMaterialDisplay();
       
       this._updateTurnIndicator();
     };
@@ -306,6 +308,18 @@ class ChessApp {
         reason: winner === 'draw' ? 'stalemate' : 'checkmate'
       });
     };
+
+    this.board.onDraw = () => {
+      this.socket.emit('game_over', {
+        matchId: this.activeMatch.matchId,
+        winner: 'draw',
+        reason: 'fifty_move_rule'
+      });
+      this._showStatusBanner('Draw by 50-move rule');
+    };
+
+    // Update materials constantly during the match
+    this._updateMaterialDisplay();
 
     // Update opponent profile panel
     document.getElementById('opponent-name-display').innerText = opponent.username;
@@ -430,6 +444,8 @@ class ChessApp {
             reason: 'timeout'
           });
         }
+      } else if (this.timers[activeColor] <= 10) {
+        this.board.playSynthSound('warning');
       }
       this._updateTimerDisplay();
     }, 1000);
@@ -439,23 +455,87 @@ class ChessApp {
     if (!this.activeMatch) {
       document.getElementById('user-timer').innerText = '—';
       document.getElementById('opponent-timer').innerText = '—';
+      document.getElementById('user-timer').classList.remove('running-down');
+      document.getElementById('opponent-timer').classList.remove('running-down');
       return;
     }
     const format = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
-    
-    if (this.board.playerColor === 'white') {
-      document.getElementById('user-timer').innerText = format(this.timers.white);
-      document.getElementById('opponent-timer').innerText = format(this.timers.black);
-    } else {
-      document.getElementById('user-timer').innerText = format(this.timers.black);
-      document.getElementById('opponent-timer').innerText = format(this.timers.white);
-    }
+    const isWhite = this.board.playerColor === 'white';
+    const myTimer = isWhite ? this.timers.white : this.timers.black;
+    const opponentTimer = isWhite ? this.timers.black : this.timers.white;
+    const myEl = document.getElementById('user-timer');
+    const oppEl = document.getElementById('opponent-timer');
+
+    myEl.innerText = format(myTimer);
+    oppEl.innerText = format(opponentTimer);
+
+    myEl.classList.toggle('running-down', this.board.activeTurn === this.board.playerColor && myTimer <= 15 && myTimer > 0);
+    oppEl.classList.toggle('running-down', this.board.activeTurn !== this.board.playerColor && opponentTimer <= 15 && opponentTimer > 0);
   }
 
   _updateTurnIndicator() {
     const isMyTurn = this.board.activeTurn === this.board.playerColor;
     document.getElementById('user-timer').classList.toggle('active', isMyTurn);
     document.getElementById('opponent-timer').classList.toggle('active', !isMyTurn);
+  }
+
+  _updateMaterialDisplay() {
+    if (!this.activeMatch) {
+      document.getElementById('material-panel')?.classList.add('hidden');
+      return;
+    }
+    const material = this.board.getMaterialScore();
+    const whiteEl = document.getElementById('material-white');
+    const blackEl = document.getElementById('material-black');
+    const panel = document.getElementById('material-panel');
+    if (whiteEl) whiteEl.innerText = `White: ${material.white}`;
+    if (blackEl) blackEl.innerText = `Black: ${material.black}`;
+    panel?.classList.remove('hidden');
+  }
+
+  _formatMoveNotation(move) {
+    if (!move) return '';
+    if (move.castling) return move.castling;
+    const piece = move.piece.toLowerCase() === 'p' ? '' : move.piece.toUpperCase();
+    const capture = move.capture ? 'x' : '';
+    const promo = move.promotion ? `=${move.promotion}` : '';
+    return `${piece}${move.from}${capture}${move.to}${promo}`;
+  }
+
+  _generatePgn() {
+    const history = this.board.getRawMoveHistory();
+    const lines = [];
+    for (let i = 0; i < history.length; i += 2) {
+      const moveNumber = Math.floor(i / 2) + 1;
+      const whiteMove = this._formatMoveNotation(history[i]);
+      const blackMove = history[i + 1] ? this._formatMoveNotation(history[i + 1]) : '';
+      lines.push(`${moveNumber}. ${whiteMove}${blackMove ? ' ' + blackMove : ''}`);
+    }
+    const whiteName = this.activeMatch?.color === 'white' ? this.currentUser.username : this.activeMatch?.opponent.username || 'Opponent';
+    const blackName = this.activeMatch?.color === 'black' ? this.currentUser.username : this.activeMatch?.opponent.username || 'Opponent';
+    return `[Event "YayChess"]\n[Site "Local"]\n[Date "${new Date().toISOString().slice(0,10)}"]\n[White "${whiteName}"]\n[Black "${blackName}"]\n[Result "*"]\n\n${lines.join(' ')}\n`;
+  }
+
+  _downloadTextFile(filename, contents) {
+    const blob = new Blob([contents], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  _downloadPgn() {
+    this._downloadTextFile('yaychess-game.pgn', this._generatePgn());
+  }
+
+  _downloadFen() {
+    const fen = this.board.getFen();
+    this._downloadTextFile('yaychess-position.fen', fen);
+    this._showStatusBanner('FEN exported');
   }
 
   // ─── Status Banner ─────────────────────────────────────────────────────────
@@ -622,6 +702,22 @@ class ChessApp {
     });
 
     // Action Bar
+    const exportPgnBtn = document.getElementById('action-export-pgn');
+    if (exportPgnBtn) {
+      exportPgnBtn.addEventListener('click', () => {
+        if (!this.activeMatch) return;
+        this._downloadPgn();
+      });
+    }
+
+    const exportFenBtn = document.getElementById('action-export-fen');
+    if (exportFenBtn) {
+      exportFenBtn.addEventListener('click', () => {
+        if (!this.activeMatch) return;
+        this._downloadFen();
+      });
+    }
+
     const resignBtn = document.getElementById('action-resign');
     if (resignBtn) {
       resignBtn.addEventListener('click', () => {

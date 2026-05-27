@@ -54,6 +54,22 @@ class ChessBoard {
 
     this.audioCtx = null;
     this.soundEnabled = true;
+    this.gameState = this._createInitialGameState();
+  }
+
+  _createInitialGameState() {
+    return {
+      castling: {
+        whiteK: true,
+        whiteQ: true,
+        blackK: true,
+        blackQ: true
+      },
+      enPassantTarget: null,
+      halfMoveClock: 0,
+      fullMoveNumber: 1,
+      moveHistory: []
+    };
   }
 
   init() {
@@ -161,9 +177,90 @@ class ChessBoard {
   // Execute a move — local flag determines if we fire the onMove callback
   executeMove(fromRow, fromCol, toRow, toCol, isLocal = false) {
     const piece = this.boardState[fromRow][fromCol];
+    const captured = this.boardState[toRow][toCol];
+    const isPawn = piece.toLowerCase() === 'p';
+    const isKing = piece.toLowerCase() === 'k';
+    const isRook = piece.toLowerCase() === 'r';
+    const color = piece === piece.toUpperCase() ? 'white' : 'black';
+    const opponent = color === 'white' ? 'black' : 'white';
+    const moveNotation = { piece, from: this._positionToAlgebraic(fromRow, fromCol), to: this._positionToAlgebraic(toRow, toCol) };
+
+    // Handle en passant capture
+    if (isPawn && this.gameState.enPassantTarget) {
+      const [epR, epC] = this._algebraicToPosition(this.gameState.enPassantTarget);
+      if (toRow === epR && toCol === epC && fromCol !== toCol && !captured) {
+        this.boardState[fromRow][toCol] = '';
+        moveNotation.enPassant = true;
+      }
+    }
+
+    // Handle castling
+    if (isKing && Math.abs(toCol - fromCol) === 2) {
+      if (toCol === 6) {
+        this.boardState[fromRow][5] = this.boardState[fromRow][7];
+        this.boardState[fromRow][7] = '';
+        moveNotation.castling = 'O-O';
+      } else if (toCol === 2) {
+        this.boardState[fromRow][3] = this.boardState[fromRow][0];
+        this.boardState[fromRow][0] = '';
+        moveNotation.castling = 'O-O-O';
+      }
+    }
 
     this.boardState[toRow][toCol] = piece;
     this.boardState[fromRow][fromCol] = '';
+
+    // Automatic promotion to queen
+    if (isPawn && (toRow === 0 || toRow === 7)) {
+      this.boardState[toRow][toCol] = color === 'white' ? 'Q' : 'q';
+      moveNotation.promotion = 'Q';
+    }
+
+    // Castling rights update
+    if (isKing) {
+      if (color === 'white') {
+        this.gameState.castling.whiteK = false;
+        this.gameState.castling.whiteQ = false;
+      } else {
+        this.gameState.castling.blackK = false;
+        this.gameState.castling.blackQ = false;
+      }
+    }
+    if (isRook) {
+      if (color === 'white' && fromRow === 7 && fromCol === 7) this.gameState.castling.whiteK = false;
+      if (color === 'white' && fromRow === 7 && fromCol === 0) this.gameState.castling.whiteQ = false;
+      if (color === 'black' && fromRow === 0 && fromCol === 7) this.gameState.castling.blackK = false;
+      if (color === 'black' && fromRow === 0 && fromCol === 0) this.gameState.castling.blackQ = false;
+    }
+    if (captured) {
+      const capturedIsRook = captured.toLowerCase() === 'r';
+      if (capturedIsRook) {
+        if (toRow === 7 && toCol === 7) this.gameState.castling.whiteK = false;
+        if (toRow === 7 && toCol === 0) this.gameState.castling.whiteQ = false;
+        if (toRow === 0 && toCol === 7) this.gameState.castling.blackK = false;
+        if (toRow === 0 && toCol === 0) this.gameState.castling.blackQ = false;
+      }
+    }
+    if (captured || moveNotation.enPassant) {
+      this.gameState.halfMoveClock = 0;
+    } else if (!isPawn) {
+      this.gameState.halfMoveClock += 1;
+    } else {
+      this.gameState.halfMoveClock = 0;
+    }
+
+    if (isPawn && Math.abs(toRow - fromRow) === 2) {
+      this.gameState.enPassantTarget = this._positionToAlgebraic((fromRow + toRow) / 2, fromCol);
+    } else {
+      this.gameState.enPassantTarget = null;
+    }
+
+    if (color === 'black') {
+      this.gameState.fullMoveNumber += 1;
+    }
+
+    moveNotation.capture = !!captured || !!moveNotation.enPassant;
+    this.gameState.moveHistory.push(moveNotation);
 
     this.clearHighlights();
     this.render();
@@ -178,6 +275,10 @@ class ChessBoard {
 
     // Check for check/checkmate
     this.checkGameState();
+
+    if (isLocal && this.gameState.halfMoveClock >= 100 && this.onDraw) {
+      this.onDraw();
+    }
 
     // Fire callback so app.js can relay move via socket
     if (isLocal && this.onMove) {
@@ -209,6 +310,7 @@ class ChessBoard {
       ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
     ];
     this.activeTurn = 'white';
+    this.gameState = this._createInitialGameState();
     this.clearHighlights();
     this.render();
   }
@@ -279,7 +381,7 @@ class ChessBoard {
           moves.push({ r: t1, c: col });
           const t2 = row + dir * 2;
           if (row === startRow && !state[t2][col]) {
-            moves.push({ r: t2, c: col });
+            moves.push({ r: t2, c: col, enPassantPush: true });
           }
         }
         [col - 1, col + 1].forEach(ac => {
@@ -287,6 +389,11 @@ class ChessBoard {
             const tp = state[t1]?.[ac];
             if (tp && (tp === tp.toUpperCase()) !== isWhite) {
               moves.push({ r: t1, c: ac, capture: true });
+            } else if (this.gameState.enPassantTarget) {
+              const [epR, epC] = this._algebraicToPosition(this.gameState.enPassantTarget);
+              if (epR === t1 && epC === ac && state[row][ac] && (state[row][ac] === state[row][ac].toUpperCase()) !== isWhite) {
+                moves.push({ r: t1, c: ac, capture: true, enPassant: true });
+              }
             }
           }
         });
@@ -315,12 +422,36 @@ class ChessBoard {
       case 'k': {
         [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr, dc]) => {
           const nr = row + dr, nc = col + dc;
-          if (nr >= 0 && nr < 8 && nc >= 0 && nr < 8) {
+          if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
             const dp = state[nr][nc];
             if (!dp) moves.push({ r: nr, c: nc });
             else if ((dp === dp.toUpperCase()) !== isWhite) moves.push({ r: nr, c: nc, capture: true });
           }
         });
+
+        const kingRow = isWhite ? 7 : 0;
+        if (row === kingRow && col === 4) {
+          const attacker = isWhite ? 'black' : 'white';
+          const castling = this.gameState.castling;
+          const canCastleKingSide = isWhite ? castling.whiteK : castling.blackK;
+          const canCastleQueenSide = isWhite ? castling.whiteQ : castling.blackQ;
+
+          if (canCastleKingSide && !state[kingRow][5] && !state[kingRow][6]) {
+            if (!this.isSquareAttackedBy(kingRow, 4, attacker) &&
+                !this.isSquareAttackedBy(kingRow, 5, attacker) &&
+                !this.isSquareAttackedBy(kingRow, 6, attacker)) {
+              moves.push({ r: kingRow, c: 6, castling: 'king' });
+            }
+          }
+
+          if (canCastleQueenSide && !state[kingRow][3] && !state[kingRow][2] && !state[kingRow][1]) {
+            if (!this.isSquareAttackedBy(kingRow, 4, attacker) &&
+                !this.isSquareAttackedBy(kingRow, 3, attacker) &&
+                !this.isSquareAttackedBy(kingRow, 2, attacker)) {
+              moves.push({ r: kingRow, c: 2, castling: 'queen' });
+            }
+          }
+        }
         break;
       }
     }
@@ -385,6 +516,71 @@ class ChessBoard {
     });
   }
 
+  _positionToAlgebraic(row, col) {
+    const files = ['a','b','c','d','e','f','g','h'];
+    const ranks = ['8','7','6','5','4','3','2','1'];
+    return `${files[col]}${ranks[row]}`;
+  }
+
+  _algebraicToPosition(square) {
+    const files = { a:0,b:1,c:2,d:3,e:4,f:5,g:6,h:7 };
+    return [8 - Number(square[1]), files[square[0]]];
+  }
+
+  getFen() {
+    const rows = this.boardState.map(row => {
+      let fenRow = '';
+      let empty = 0;
+      row.forEach(cell => {
+        if (!cell) {
+          empty += 1;
+        } else {
+          if (empty) { fenRow += empty; empty = 0; }
+          fenRow += cell;
+        }
+      });
+      if (empty) fenRow += empty;
+      return fenRow;
+    });
+
+    const castling = [];
+    if (this.gameState.castling.whiteK) castling.push('K');
+    if (this.gameState.castling.whiteQ) castling.push('Q');
+    if (this.gameState.castling.blackK) castling.push('k');
+    if (this.gameState.castling.blackQ) castling.push('q');
+    const castlingStr = castling.length ? castling.join('') : '-';
+
+    const enPassant = this.gameState.enPassantTarget || '-';
+    const halfmove = this.gameState.halfMoveClock;
+    const fullmove = this.gameState.fullMoveNumber;
+
+    return `${rows.join('/')}` +
+           ` ${this.activeTurn}` +
+           ` ${castlingStr}` +
+           ` ${enPassant}` +
+           ` ${halfmove}` +
+           ` ${fullmove}`;
+  }
+
+  getMaterialScore() {
+    const values = { p:1, n:3, b:3, r:5, q:9, k:0 };
+    const score = { white: 0, black: 0 };
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const piece = this.boardState[r][c];
+        if (!piece) continue;
+        const isWhite = piece === piece.toUpperCase();
+        const value = values[piece.toLowerCase()] || 0;
+        score[isWhite ? 'white' : 'black'] += value;
+      }
+    }
+    return score;
+  }
+
+  getRawMoveHistory() {
+    return [...this.gameState.moveHistory];
+  }
+
   hasAnyLegalMove(color, state = this.boardState) {
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
@@ -443,6 +639,12 @@ class ChessBoard {
         gain.gain.setValueAtTime(0.3, now);
         gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
         osc.start(now); osc.stop(now + 0.12);
+      } else if (type === 'warning') {
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(880, now);
+        gain.gain.setValueAtTime(0.18, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        osc.start(now); osc.stop(now + 0.1);
       }
     } catch (e) { /* Browser audio context may require user interaction first */ }
   }

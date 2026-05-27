@@ -78,6 +78,24 @@
 
       <!-- In-Game Action Bar -->
       <div class="game-actions-bar hidden" id="game-actions">
+        <div class="material-balance hidden" id="material-panel">
+          <span id="material-white">White: 0</span>
+          <span id="material-black">Black: 0</span>
+        </div>
+        <button class="action-btn" id="action-export-pgn" title="Download PGN">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 4h16v16H4z"></path>
+            <path d="M8 8h8M8 12h8M8 16h8"></path>
+          </svg>
+          PGN
+        </button>
+        <button class="action-btn" id="action-export-fen" title="Download FEN">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 4h16v16H4z"></path>
+            <path d="M8 8h8M8 12h8"></path>
+          </svg>
+          FEN
+        </button>
         <button class="action-btn" id="action-resign" title="Resign Match">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
