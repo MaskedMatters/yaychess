@@ -39,9 +39,10 @@ function generateIdentity() {
   return { username: `${adj}${animal.name}`, emoji: animal.emoji };
 }
 
+import { ChessBoard } from './board.js';
+
 // ─── App ───────────────────────────────────────────────────────────────────────
-/* global ChessBoard, io */
-class ChessApp {
+export class ChessApp {
   constructor() {
     this.board = null;
     this.socket = null;
@@ -106,7 +107,7 @@ class ChessApp {
 
   // ─── Socket.io ─────────────────────────────────────────────────────────────
   _connectSocket() {
-    this.socket = io();
+    this.socket = window.io();
 
     this.socket.on('connect', () => {
       this.socket.emit('register_user', {

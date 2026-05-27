@@ -311,7 +311,7 @@ body {
   font-weight: 500;
 }
 
-..user-badge {
+.user-badge {
   font-size: 0.65rem;
   background: var(--color-green-soft);
   color: var(--color-green-hover);

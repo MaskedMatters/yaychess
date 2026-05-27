@@ -3,7 +3,7 @@
  * Handles grid representation, piece placements, visual highlights,
  * move validation, board theming, and interactivity controls.
  */
-class ChessBoard {
+export class ChessBoard {
   constructor(boardId) {
     this.boardEl = document.getElementById(boardId);
     this.squares = Array(8).fill(null).map(() => Array(8).fill(null));

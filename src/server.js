@@ -1,7 +1,11 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const path = require('path');
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -10,9 +14,10 @@ const io = new Server(server);
 const START_PORT = parseInt(process.env.PORT) || 3000;
 
 // Serve static files
-app.use(express.static(__dirname));
+const projectRoot = path.resolve(__dirname, '..');
+app.use(express.static(projectRoot));
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.sendFile(path.join(projectRoot, 'index.html'));
 });
 
 // ─── In-memory user registry ──────────────────────────────────────────────────
@@ -228,7 +233,7 @@ function broadcastLobby() {
 }
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
-const net = require('net');
+import net from 'net';
 
 function findFreePort(port, cb) {
   const probe = net.createServer();
