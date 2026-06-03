@@ -146,3 +146,6 @@ vite.config.ts.timestamp-*
 .git/
 .github/
 .gitignore
+
+# Application
+references/
