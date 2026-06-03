@@ -57,6 +57,11 @@ export class ChessBoard {
     this.gameState = this._createInitialGameState();
     this.premoveQueue = [];
     this.virtualBoardState = null;
+
+    // Drag and drop state
+    this.dragInfo = null; // { row, col, piece, element, startX, startY }
+    this._handleMouseMove = this.handleMouseMove.bind(this);
+    this._handleMouseUp = this.handleMouseUp.bind(this);
   }
 
   _createInitialGameState() {
@@ -93,6 +98,7 @@ export class ChessBoard {
 
         this.squares[r][c] = squareEl;
         squareEl.addEventListener('click', () => this.handleSquareClick(r, c));
+        squareEl.addEventListener('mousedown', (e) => this.handleMouseDown(e, r, c));
         this.boardEl.appendChild(squareEl);
       }
     }
@@ -124,9 +130,130 @@ export class ChessBoard {
     }
   }
 
-  handleSquareClick(row, col) {
+  handleMouseDown(e, row, col) {
+    if (!this.interactable || e.button !== 0) return;
+
+    const displayState = this.virtualBoardState || this.boardState;
+    const piece = displayState[row][col];
+    if (!piece) return;
+
+    const isWhitePiece = piece === piece.toUpperCase();
+    const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
+                      (this.playerColor === 'black' && !isWhitePiece);
+    if (!isMyPiece) return;
+
+    // Start drag
+    this.dragInfo = {
+      row, col, piece,
+      element: null,
+      startX: e.clientX,
+      startY: e.clientY
+    };
+
+    // Track if this mousedown actually selects a new piece
+    const alreadySelected = this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col;
+    this.handleSquareClick(row, col, true);
+    this._selectionChangedOnMousedown = (!alreadySelected && this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col);
+
+    window.addEventListener('mousemove', this._handleMouseMove);
+    window.addEventListener('mouseup', this._handleMouseUp);
+  }
+
+  handleMouseMove(e) {
+    if (!this.dragInfo) return;
+
+    // Only create the floating element after a small movement threshold to allow clicks
+    if (!this.dragInfo.element) {
+      const dist = Math.sqrt(Math.pow(e.clientX - this.dragInfo.startX, 2) + Math.pow(e.clientY - this.dragInfo.startY, 2));
+      if (dist > 5) {
+        const pieceImg = this.squares[this.dragInfo.row][this.dragInfo.col].querySelector('.piece');
+        if (pieceImg) {
+          const dragEl = pieceImg.cloneNode(true);
+          dragEl.style.position = 'fixed';
+          dragEl.style.width = `${pieceImg.offsetWidth}px`;
+          dragEl.style.height = `${pieceImg.offsetHeight}px`;
+          dragEl.style.zIndex = '1000';
+          dragEl.style.pointerEvents = 'none';
+          dragEl.style.opacity = '0.8';
+          document.body.appendChild(dragEl);
+          this.dragInfo.element = dragEl;
+          pieceImg.style.opacity = '0.3'; // Dim original
+        }
+      }
+    }
+
+    if (this.dragInfo.element) {
+      this.dragInfo.element.style.left = `${e.clientX - this.dragInfo.element.offsetWidth / 2}px`;
+      this.dragInfo.element.style.top = `${e.clientY - this.dragInfo.element.offsetHeight / 2}px`;
+
+      // Visual feedback for square hover
+      const squareAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+      const targetSquare = squareAtPoint?.closest('.square');
+      
+      // Clear previous hover
+      if (this._lastHoverSquare) {
+        this._lastHoverSquare.classList.remove('drag-over');
+      }
+      
+      if (targetSquare) {
+        targetSquare.classList.add('drag-over');
+        this._lastHoverSquare = targetSquare;
+      }
+    }
+  }
+
+  handleMouseUp(e) {
+    if (!this.dragInfo) return;
+
+    window.removeEventListener('mousemove', this._handleMouseMove);
+    window.removeEventListener('mouseup', this._handleMouseUp);
+
+    if (this._lastHoverSquare) {
+      this._lastHoverSquare.classList.remove('drag-over');
+      this._lastHoverSquare = null;
+    }
+
+    const wasDragging = !!this.dragInfo.element;
+    if (wasDragging) {
+      this.dragInfo.element.remove();
+      const originalPieceImg = this.squares[this.dragInfo.row][this.dragInfo.col].querySelector('.piece');
+      if (originalPieceImg) originalPieceImg.style.opacity = '';
+
+      // Find the square we are over
+      const squareAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+      const targetSquare = squareAtPoint?.closest('.square');
+      
+      if (targetSquare) {
+        const targetRow = parseInt(targetSquare.dataset.row);
+        const targetCol = parseInt(targetSquare.dataset.col);
+        
+        // Execute move if different square
+        if (targetRow !== this.dragInfo.row || targetCol !== this.dragInfo.col) {
+          this._justDragged = true;
+          this.handleSquareClick(targetRow, targetCol, false, true);
+        }
+      }
+    }
+
+    this.dragInfo = null;
+  }
+
+  handleSquareClick(row, col, fromMousedown = false, forceExecute = false) {
     // Board is locked unless this client is playing
     if (!this.interactable) return;
+    
+    // If we just finished a drag, ignore the subsequent click event
+    if (this._justDragged && !fromMousedown && !forceExecute) {
+      this._justDragged = false;
+      return;
+    }
+
+    // If mousedown already handled the selection of this square, ignore the follow-up click
+    if (!fromMousedown && this._selectionChangedOnMousedown && 
+        this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col) {
+      this._selectionChangedOnMousedown = false;
+      return;
+    }
 
     const squareEl = this.squares[row][col];
     const displayState = this.virtualBoardState || this.boardState;
@@ -136,6 +263,7 @@ export class ChessBoard {
     if (this.activeTurn !== this.playerColor) {
       if (this.selectedSquare) {
         if (this.selectedSquare.row === row && this.selectedSquare.col === col) {
+          if (fromMousedown) return; // Don't deselect on drag start
           this.clearHighlights();
           return;
         }
@@ -152,7 +280,7 @@ export class ChessBoard {
       }
 
       // Select piece for premove
-      this.clearHighlights();
+      if (!fromMousedown) this.clearHighlights();
       if (piece) {
         const isWhitePiece = piece === piece.toUpperCase();
         const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
@@ -185,6 +313,7 @@ export class ChessBoard {
     // Normal move logic
     // Deselect on same square click
     if (this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col) {
+      if (fromMousedown) return; // Don't deselect on drag start
       this.clearHighlights();
       return;
     }
@@ -199,7 +328,7 @@ export class ChessBoard {
     }
 
     // Select piece — only if it belongs to the active player's color
-    this.clearHighlights();
+    if (!fromMousedown) this.clearHighlights();
     if (piece) {
       const isWhitePiece = piece === piece.toUpperCase();
       const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
