@@ -480,6 +480,7 @@ export class ChessApp {
     // Update board visuals without firing callbacks or mutating game state
     this.board.boardState = snap.boardState.map(r => [...r]);
     this.board.activeTurn = snap.activeTurn;
+    this.board._clearLastMoveHighlights();
     this.board.clearHighlights();
     this.board.render();
 

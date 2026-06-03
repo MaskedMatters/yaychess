@@ -499,9 +499,18 @@ body {
   z-index: 2;
 }
 
-.square.drag-over {
-  box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.4);
-  z-index: 5;
+.square.right-click-highlight {
+  background-color: #ff4d4d !important; /* Solid light red */
+}
+
+.arrows-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
 }
 
 .move-dot {

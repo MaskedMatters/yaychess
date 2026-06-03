@@ -62,6 +62,12 @@ export class ChessBoard {
     this.dragInfo = null; // { row, col, piece, element, startX, startY }
     this._handleMouseMove = this.handleMouseMove.bind(this);
     this._handleMouseUp = this.handleMouseUp.bind(this);
+
+    // Right-click visuals state
+    this.rightClickDragInfo = null; // { startRow, startCol }
+    this.arrows = []; // [{ fromRow, fromCol, toRow, toCol }]
+    this._handleRightClickMove = this.handleRightClickMove.bind(this);
+    this._handleRightClickEnd = this.handleRightClickEnd.bind(this);
   }
 
   _createInitialGameState() {
@@ -81,6 +87,13 @@ export class ChessBoard {
 
   init() {
     this.boardEl.innerHTML = '';
+
+    // Create SVG overlay for arrows
+    this.svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.svgOverlay.setAttribute('class', 'arrows-overlay');
+    this.boardEl.appendChild(this.svgOverlay);
+
+    this.boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
 
     const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
@@ -131,32 +144,196 @@ export class ChessBoard {
   }
 
   handleMouseDown(e, row, col) {
-    if (!this.interactable || e.button !== 0) return;
+    if (!this.interactable) return;
 
-    const displayState = this.virtualBoardState || this.boardState;
-    const piece = displayState[row][col];
-    if (!piece) return;
+    // Left click
+    if (e.button === 0) {
+      this.clearRightClickVisuals();
+      
+      const displayState = this.virtualBoardState || this.boardState;
+      const piece = displayState[row][col];
+      if (!piece) return;
 
-    const isWhitePiece = piece === piece.toUpperCase();
-    const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
-                      (this.playerColor === 'black' && !isWhitePiece);
-    if (!isMyPiece) return;
+      const isWhitePiece = piece === piece.toUpperCase();
+      const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
+                        (this.playerColor === 'black' && !isWhitePiece);
+      if (!isMyPiece) return;
 
-    // Start drag
-    this.dragInfo = {
-      row, col, piece,
-      element: null,
-      startX: e.clientX,
-      startY: e.clientY
-    };
+      // Start drag
+      this.dragInfo = {
+        row, col, piece,
+        element: null,
+        startX: e.clientX,
+        startY: e.clientY
+      };
 
-    // Track if this mousedown actually selects a new piece
-    const alreadySelected = this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col;
-    this.handleSquareClick(row, col, true);
-    this._selectionChangedOnMousedown = (!alreadySelected && this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col);
+      // Track if this mousedown actually selects a new piece
+      const alreadySelected = this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col;
+      this.handleSquareClick(row, col, true);
+      this._selectionChangedOnMousedown = (!alreadySelected && this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col);
 
-    window.addEventListener('mousemove', this._handleMouseMove);
-    window.addEventListener('mouseup', this._handleMouseUp);
+      window.addEventListener('mousemove', this._handleMouseMove);
+      window.addEventListener('mouseup', this._handleMouseUp);
+    }
+    // Right click
+    else if (e.button === 2) {
+      this.rightClickDragInfo = { startRow: row, startCol: col };
+      window.addEventListener('mousemove', this._handleRightClickMove);
+      window.addEventListener('mouseup', this._handleRightClickEnd);
+    }
+  }
+
+  handleRightClickMove(e) {
+    if (!this.rightClickDragInfo) return;
+
+    const squareAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+    const targetSquare = squareAtPoint?.closest('.square');
+    
+    // Preview current arrow
+    this.renderArrows();
+    if (targetSquare) {
+      const targetRow = parseInt(targetSquare.dataset.row);
+      const targetCol = parseInt(targetSquare.dataset.col);
+      if (targetRow !== this.rightClickDragInfo.startRow || targetCol !== this.rightClickDragInfo.startCol) {
+        this._drawArrow(this.rightClickDragInfo.startRow, this.rightClickDragInfo.startCol, targetRow, targetCol, true);
+      }
+    }
+  }
+
+  handleRightClickEnd(e) {
+    if (!this.rightClickDragInfo) return;
+
+    window.removeEventListener('mousemove', this._handleRightClickMove);
+    window.removeEventListener('mouseup', this._handleRightClickEnd);
+
+    const squareAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+    const targetSquare = squareAtPoint?.closest('.square');
+
+    if (targetSquare) {
+      const targetRow = parseInt(targetSquare.dataset.row);
+      const targetCol = parseInt(targetSquare.dataset.col);
+
+      if (targetRow === this.rightClickDragInfo.startRow && targetCol === this.rightClickDragInfo.startCol) {
+        // Toggle highlight
+        targetSquare.classList.toggle('right-click-highlight');
+      } else {
+        // Add or remove arrow
+        const existingIdx = this.arrows.findIndex(a => 
+          a.fromRow === this.rightClickDragInfo.startRow && 
+          a.fromCol === this.rightClickDragInfo.startCol && 
+          a.toRow === targetRow && 
+          a.toCol === targetCol
+        );
+        if (existingIdx !== -1) {
+          this.arrows.splice(existingIdx, 1);
+        } else {
+          this.arrows.push({ 
+            fromRow: this.rightClickDragInfo.startRow, 
+            fromCol: this.rightClickDragInfo.startCol, 
+            toRow: targetRow, 
+            toCol: targetCol 
+          });
+        }
+      }
+    }
+
+    this.rightClickDragInfo = null;
+    this.renderArrows();
+  }
+
+  renderArrows() {
+    // Clear current arrows
+    while (this.svgOverlay.firstChild) {
+      this.svgOverlay.removeChild(this.svgOverlay.firstChild);
+    }
+
+    this.arrows.forEach(a => {
+      this._drawArrow(a.fromRow, a.fromCol, a.toRow, a.toCol);
+    });
+  }
+
+  _drawArrow(fromR, fromC, toR, toC, isPreview = false) {
+    const fromSq = this.squares[fromR][fromC];
+    const toSq = this.squares[toR][toC];
+    if (!fromSq || !toSq) return;
+
+    const boardRect = this.boardEl.getBoundingClientRect();
+    const fromRect = fromSq.getBoundingClientRect();
+    const toRect = toSq.getBoundingClientRect();
+
+    let x1, y1, x2, y2;
+
+    if (this.flipped) {
+      x1 = boardRect.right - (fromRect.left + fromRect.width / 2);
+      y1 = boardRect.bottom - (fromRect.top + fromRect.height / 2);
+      x2 = boardRect.right - (toRect.left + toRect.width / 2);
+      y2 = boardRect.bottom - (toRect.top + toRect.height / 2);
+    } else {
+      x1 = (fromRect.left + fromRect.width / 2) - boardRect.left;
+      y1 = (fromRect.top + fromRect.height / 2) - boardRect.top;
+      x2 = (toRect.left + toRect.width / 2) - boardRect.left;
+      y2 = (toRect.top + toRect.height / 2) - boardRect.top;
+    }
+
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const dist = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+
+    // Arrowhead geometry: equilateral triangle
+    const headSize = fromRect.width * 0.38; // Increased from 0.3
+    const headHeight = headSize * 0.866; // s * sqrt(3)/2
+    
+    // Calculate triangle vertices
+    // Tip is exactly at target center
+    const tipX = x2;
+    const tipY = y2;
+    
+    // Center of the base
+    const baseCenterX = tipX - headHeight * Math.cos(angle);
+    const baseCenterY = tipY - headHeight * Math.sin(angle);
+    
+    // Base corners
+    const x3 = baseCenterX + (headSize / 2) * Math.sin(angle);
+    const y3 = baseCenterY - (headSize / 2) * Math.cos(angle);
+    const x4 = baseCenterX - (headSize / 2) * Math.sin(angle);
+    const y4 = baseCenterY + (headSize / 2) * Math.cos(angle);
+
+    // Create a group to handle transparency uniformly
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('opacity', isPreview ? '0.4' : '0.7');
+    g.style.pointerEvents = 'none';
+
+    // Draw the line (shaft)
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1);
+    line.setAttribute('y1', y1);
+    // Line ends slightly inside the arrowhead to ensure no gap
+    line.setAttribute('x2', baseCenterX + (headHeight * 0.2) * Math.cos(angle));
+    line.setAttribute('y2', baseCenterY + (headHeight * 0.2) * Math.sin(angle));
+    line.setAttribute('stroke', '#ff7800');
+    line.setAttribute('stroke-width', fromRect.width * 0.17); // Thinner (from 0.22)
+    line.setAttribute('stroke-linecap', 'round');
+    g.appendChild(line);
+
+    // Draw the arrowhead (triangle)
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', `${tipX},${tipY} ${x3},${y3} ${x4},${y4}`);
+    poly.setAttribute('fill', '#ff7800');
+    poly.setAttribute('stroke', '#ff7800');
+    poly.setAttribute('stroke-width', '2');
+    poly.setAttribute('stroke-linejoin', 'round');
+    g.appendChild(poly);
+
+    this.svgOverlay.appendChild(g);
+  }
+
+  clearRightClickVisuals() {
+    this.arrows = [];
+    this.renderArrows();
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c].classList.remove('right-click-highlight');
+      }
+    }
   }
 
   handleMouseMove(e) {
@@ -445,6 +622,8 @@ export class ChessBoard {
     moveNotation.capture = !!captured || !!moveNotation.enPassant;
     this.gameState.moveHistory.push(moveNotation);
 
+    this.clearRightClickVisuals();
+    this._clearLastMoveHighlights();
     this.clearHighlights();
     this.render();
 
@@ -483,6 +662,14 @@ export class ChessBoard {
       }
     }
     this._refreshPremoveHighlights();
+  }
+
+  _clearLastMoveHighlights() {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c].classList.remove('last-move');
+      }
+    }
   }
 
   addPremove(fromR, fromC, toR, toC) {
