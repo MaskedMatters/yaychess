@@ -55,6 +55,8 @@ export class ChessBoard {
     this.audioCtx = null;
     this.soundEnabled = true;
     this.gameState = this._createInitialGameState();
+    this.premoveQueue = [];
+    this.virtualBoardState = null;
   }
 
   _createInitialGameState() {
@@ -101,10 +103,11 @@ export class ChessBoard {
 
   // Render piece images onto squares
   render() {
+    const displayState = this.virtualBoardState || this.boardState;
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const squareEl = this.squares[r][c];
-        const piece = this.boardState[r][c];
+        const piece = displayState[r][c];
 
         const oldImg = squareEl.querySelector('.piece');
         if (oldImg) oldImg.remove();
@@ -122,13 +125,64 @@ export class ChessBoard {
   }
 
   handleSquareClick(row, col) {
-    // Board is locked unless this client is playing and it is their turn
+    // Board is locked unless this client is playing
     if (!this.interactable) return;
-    if (this.activeTurn !== this.playerColor) return;
 
     const squareEl = this.squares[row][col];
-    const piece = this.boardState[row][col];
+    const displayState = this.virtualBoardState || this.boardState;
+    const piece = displayState[row][col];
 
+    // Premove logic: if it's NOT our turn
+    if (this.activeTurn !== this.playerColor) {
+      if (this.selectedSquare) {
+        if (this.selectedSquare.row === row && this.selectedSquare.col === col) {
+          this.clearHighlights();
+          return;
+        }
+
+        // Only allow premoving to a "basic" valid square
+        const isValidBasicMove = this.selectedSquare.validMoves.some(m => m.r === row && m.c === col);
+        if (isValidBasicMove) {
+          // Record premove
+          this.addPremove(this.selectedSquare.row, this.selectedSquare.col, row, col);
+        }
+        
+        this.clearHighlights();
+        return;
+      }
+
+      // Select piece for premove
+      this.clearHighlights();
+      if (piece) {
+        const isWhitePiece = piece === piece.toUpperCase();
+        const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
+                          (this.playerColor === 'black' && !isWhitePiece);
+        if (isMyPiece) {
+          const basicMoves = this.getBasicMovesForPiece(row, col, piece);
+          this.selectedSquare = { row, col, piece, validMoves: basicMoves };
+          squareEl.classList.add('selected');
+          this.playSynthSound('select');
+
+          // Show highlights for premove (simplified dots)
+          if (document.getElementById('highlight-setting')?.checked) {
+            basicMoves.forEach(move => {
+              const cell = this.squares[move.r][move.c];
+              cell.classList.add('highlight-move');
+              const dot = document.createElement('span');
+              dot.className = 'move-dot';
+              cell.appendChild(dot);
+            });
+          }
+        } else {
+          this.clearPremoves();
+        }
+      } else {
+        this.clearPremoves();
+      }
+      return;
+    }
+
+    // Normal move logic
     // Deselect on same square click
     if (this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col) {
       this.clearHighlights();
@@ -273,6 +327,9 @@ export class ChessBoard {
     // Switch active turn
     this.activeTurn = this.activeTurn === 'white' ? 'black' : 'white';
 
+    // Try to play next premove if it's now our turn
+    this.tryPlayPremove();
+
     // Fire callback so app.js can relay move via socket FIRST
     if (isLocal && this.onMove) {
       this.onMove(fromRow, fromCol, toRow, toCol);
@@ -291,11 +348,88 @@ export class ChessBoard {
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const sq = this.squares[r][c];
-        sq.classList.remove('selected', 'highlight-move', 'highlight-capture', 'last-move');
+        sq.classList.remove('selected', 'highlight-move', 'highlight-capture');
         const dot = sq.querySelector('.move-dot');
         if (dot) dot.remove();
       }
     }
+    this._refreshPremoveHighlights();
+  }
+
+  addPremove(fromR, fromC, toR, toC) {
+    if (!this.virtualBoardState) {
+      this.virtualBoardState = this.boardState.map(r => [...r]);
+    }
+    
+    // Visually move the piece in the virtual board
+    let piece = this.virtualBoardState[fromR][fromC];
+    
+    // Handle virtual promotion for pawns reaching the last rank
+    if (piece.toLowerCase() === 'p' && (toR === 0 || toR === 7)) {
+      piece = piece === 'P' ? 'Q' : 'q';
+    }
+
+    this.virtualBoardState[toR][toC] = piece;
+    this.virtualBoardState[fromR][fromC] = '';
+
+    this.premoveQueue.push({ fromR, fromC, toR, toC });
+    this._refreshPremoveHighlights();
+    this.render();
+    this.playSynthSound('move');
+  }
+
+  clearPremoves() {
+    this.premoveQueue = [];
+    this.virtualBoardState = null;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c].classList.remove('premove');
+      }
+    }
+    this.render();
+  }
+
+  tryPlayPremove() {
+    if (this.activeTurn !== this.playerColor || this.premoveQueue.length === 0) {
+      this.virtualBoardState = null; // Sync back to real board when turn starts or queue empty
+      this.render();
+      return;
+    }
+
+    const move = this.premoveQueue.shift();
+    const piece = this.boardState[move.fromR][move.fromC];
+    
+    if (!piece) {
+      this.clearPremoves();
+      return;
+    }
+
+    const legalMoves = this.getLegalMovesForPiece(move.fromR, move.fromC, piece);
+    const isLegal = legalMoves.some(m => m.r === move.toR && m.c === move.toC);
+
+    if (isLegal) {
+      // Small delay to make it feel smoother if it's right after an opponent move
+      setTimeout(() => {
+        this.executeMove(move.fromR, move.fromC, move.toR, move.toC, true);
+      }, 100);
+    } else {
+      this.clearPremoves();
+    }
+  }
+
+  _refreshPremoveHighlights() {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c].classList.remove('premove');
+      }
+    }
+    if (!this.interactable) return;
+
+    this.premoveQueue.forEach(m => {
+      // Always highlight the original from/to squares for each premove in the chain
+      this.squares[m.fromR][m.fromC].classList.add('premove');
+      this.squares[m.toR][m.toC].classList.add('premove');
+    });
   }
 
   resetBoard() {
@@ -311,6 +445,7 @@ export class ChessBoard {
     ];
     this.activeTurn = 'white';
     this.gameState = this._createInitialGameState();
+    this.clearPremoves();
     this.clearHighlights();
     this.render();
   }
@@ -318,6 +453,7 @@ export class ChessBoard {
   setInteractable(interactable, playerColor = null) {
     this.interactable = interactable;
     if (playerColor) this.playerColor = playerColor;
+    this._refreshPremoveHighlights();
     this._updateBoardCursor();
   }
 
@@ -361,6 +497,64 @@ export class ChessBoard {
   setOrientation(color) {
     this.flipped = (color === 'black');
     this.boardEl.classList.toggle('flipped', this.flipped);
+  }
+
+  // ─── Simplified Move Calculation for Premoves ─────────────────────────────
+  // Returns all squares a piece could fundamentally reach on a blank board.
+  getBasicMovesForPiece(row, col, piece) {
+    const isWhite = piece === piece.toUpperCase();
+    const type = piece.toLowerCase();
+    const moves = [];
+
+    const addIfValid = (r, c) => {
+      if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+        moves.push({ r, c });
+        return true;
+      }
+      return false;
+    };
+
+    switch (type) {
+      case 'p': {
+        const dir = isWhite ? -1 : 1;
+        addIfValid(row + dir, col);     // Forward
+        addIfValid(row + dir, col - 1); // Diagonal capture
+        addIfValid(row + dir, col + 1); // Diagonal capture
+        // Allow double push if at starting rank
+        if ((isWhite && row === 6) || (!isWhite && row === 1)) {
+          addIfValid(row + dir * 2, col);
+        }
+        break;
+      }
+      case 'n': {
+        [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr, dc]) => {
+          addIfValid(row + dr, col + dc);
+        });
+        break;
+      }
+      case 'b':
+        for (let i = 1; i < 8; i++) {
+          [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(([dr, dc]) => addIfValid(row + dr * i, col + dc * i));
+        }
+        break;
+      case 'r':
+        for (let i = 1; i < 8; i++) {
+          [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr, dc]) => addIfValid(row + dr * i, col + dc * i));
+        }
+        break;
+      case 'q':
+        for (let i = 1; i < 8; i++) {
+          [[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr, dc]) => addIfValid(row + dr * i, col + dc * i));
+        }
+        break;
+      case 'k': {
+        [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr, dc]) => {
+          addIfValid(row + dr, col + dc);
+        });
+        break;
+      }
+    }
+    return moves;
   }
 
   // ─── Move Calculation ──────────────────────────────────────────────────────

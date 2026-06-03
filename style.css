@@ -518,7 +518,13 @@ body {
 }
 
 .square.last-move {
-  background-color: rgba(247, 247, 84, 0.4) !important;
+  background-color: rgba(220, 200, 100, 0.22) !important; /* Soft Pale Gold */
+  backdrop-filter: brightness(1.1);
+}
+
+.square.premove {
+  background-color: rgba(130, 140, 200, 0.25) !important; /* Soft Cool Lavender/Blue */
+  backdrop-filter: brightness(1.15);
 }
 
 /* ==========================================================================

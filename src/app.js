@@ -491,8 +491,7 @@ export class ChessApp {
 
     // Lock/unlock board: only playable when on the live position
     const isLive = index === this.moveSnapshots.length - 1;
-    const isMyTurn = this.board.activeTurn === this.board.playerColor;
-    this.board.setInteractable(isLive && isMyTurn && !!this.activeMatch);
+    this.board.setInteractable(isLive && !!this.activeMatch);
 
     this._updateNavigator();
   }
