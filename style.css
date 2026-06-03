@@ -499,8 +499,18 @@ body {
   z-index: 2;
 }
 
-.square.highlight-capture {
-  box-shadow: inset 0 0 0 5px rgba(0, 0, 0, 0.15);
+.square.right-click-highlight {
+  background-color: #ff4d4d !important; /* Solid light red */
+}
+
+.arrows-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 20;
 }
 
 .move-dot {
@@ -518,7 +528,13 @@ body {
 }
 
 .square.last-move {
-  background-color: rgba(247, 247, 84, 0.4) !important;
+  background-color: rgba(220, 200, 100, 0.22) !important; /* Soft Pale Gold */
+  backdrop-filter: brightness(1.1);
+}
+
+.square.premove {
+  background-color: rgba(130, 140, 200, 0.25) !important; /* Soft Cool Lavender/Blue */
+  backdrop-filter: brightness(1.15);
 }
 
 /* ==========================================================================
@@ -1216,6 +1232,14 @@ body {
 }
 
 /* In-Game Chat Styles */
+#game-match-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-grow: 1;
+  min-height: 0;
+}
+
 #game-chat-view {
   display: flex;
   flex-direction: column;
@@ -1225,6 +1249,133 @@ body {
   border: 1px solid var(--border-light);
   overflow: hidden;
   padding: 12px;
+}
+
+/* Move Navigator */
+#move-navigator {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.move-list-track {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Fade out edges to indicate more moves in each direction */
+.move-list-track::before,
+.move-list-track::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 36px;
+  pointer-events: none;
+  z-index: 2;
+  transition: opacity var(--transition-fast);
+}
+
+.move-list-track::before {
+  left: 0;
+  background: linear-gradient(to right, #1a1917 0%, transparent 100%);
+}
+
+.move-list-track::after {
+  right: 0;
+  background: linear-gradient(to left, #1a1917 0%, transparent 100%);
+}
+
+.move-list {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
+  min-height: 32px;
+  /* shifted via JS translateX so active chip is always centred */
+  will-change: transform;
+}
+
+.move-num {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  font-weight: 600;
+  font-family: var(--font-display);
+  white-space: nowrap;
+  padding: 0 3px 0 6px;
+  flex-shrink: 0;
+}
+
+.move-num:first-child {
+  padding-left: 0;
+}
+
+.move-chip {
+  background: none;
+  border: none;
+  color: var(--color-text-normal);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  padding: 4px 7px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.move-chip:hover {
+  background: var(--bg-hover);
+  color: var(--color-text-bright);
+}
+
+.move-chip.active {
+  background: var(--color-green-soft);
+  color: var(--color-green-hover);
+  font-weight: 600;
+}
+
+.move-nav-controls {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  border-top: 1px solid var(--border-light);
+  padding-top: 8px;
+}
+
+.nav-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  width: 34px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.nav-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.nav-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--color-text-bright);
+  border-color: rgba(255,255,255,0.15);
+}
+
+.nav-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 #game-chat-view .section-label {
@@ -1601,9 +1752,52 @@ input:checked + .slider:before {
   border-color: #c0392b;
 }
 
-/* ==========================================================================
-   ANIMATIONS
-   ========================================================================== */
+.promotion-card {
+  max-width: 340px;
+  padding: 32px;
+}
+
+.promotion-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.promo-btn {
+  background: rgba(0, 0, 0, 0.2);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.promo-btn:hover {
+  border-color: var(--color-green);
+  background: var(--bg-hover);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-md);
+}
+
+.promo-img {
+  width: 50px;
+  height: 50px;
+  object-fit: contain;
+}
+
+.promo-label {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--color-text-bright);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
 @keyframes pulse-online {
   0% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.2); opacity: 0.8; }

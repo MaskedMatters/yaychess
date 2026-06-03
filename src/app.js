@@ -60,7 +60,6 @@ export class ChessApp {
     this.onlinePlayers = [];
 
     this.selectedColor = 'random';
-    this.timers = { white: 0, black: 0 };
     this.incrementSeconds = 0;
     this.timerInterval = null;
     this._lastChallengedSocketId = null;
@@ -70,6 +69,10 @@ export class ChessApp {
     this.matchTimeControl = { initial: 0, increment: 0 };
     this.matchResult = '*';
     this.matchTermination = 'unfinished';
+
+    // Authoritative timer state
+    this.lastTurnTimestamp = null;
+    this.timersMs = { white: 0, black: 0 };
   }
 
   init() {
@@ -140,9 +143,11 @@ export class ChessApp {
     });
 
     // Match started
-    this.socket.on('match_started', ({ matchId, color, opponent, timeSeconds, incrementSeconds }) => {
+    this.socket.on('match_started', ({ matchId, color, opponent, timeSeconds, incrementSeconds, lastTurnTimestamp }) => {
       this._hideChallengeModal();
       this.activeMatch = { matchId, color, opponent };
+      this.lastTurnTimestamp = lastTurnTimestamp;
+      this.timersMs = { white: timeSeconds * 1000, black: timeSeconds * 1000 };
       this._startMatch(color, opponent, timeSeconds, incrementSeconds);
     });
 
@@ -155,15 +160,30 @@ export class ChessApp {
     });
 
     // Incoming move from opponent
-    this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol }) => {
-      this.board.executeMove(fromRow, fromCol, toRow, toCol, false);
+    this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol, promotion, timers, lastTurnTimestamp, activeTurn }) => {
+      // Sync authoritative state
+      if (timers) this.timersMs = timers;
+      if (lastTurnTimestamp) this.lastTurnTimestamp = lastTurnTimestamp;
+
+      // If the viewer is browsing history, the board's visual state is a past
+      // snapshot. We must restore the real live position before executing the
+      // move, otherwise executeMove will operate on stale/incorrect data.
+      if (this.moveSnapshots && this.navIndex < this.moveSnapshots.length - 1) {
+        const liveSnap = this.moveSnapshots[this.moveSnapshots.length - 1];
+        this.board.boardState = liveSnap.boardState.map(r => [...r]);
+        this.board.activeTurn = liveSnap.activeTurn;
+      }
+
+      this.board.executeMove(fromRow, fromCol, toRow, toCol, false, true, promotion);
       this._updateMaterialDisplay();
 
-      // Apply increment to opponent
-      const opponentColor = this.board.playerColor === 'white' ? 'black' : 'white';
-      this.timers[opponentColor] += this.incrementSeconds;
+      // We no longer manually add increment here as server sends authoritative timers
       this._updateTimerDisplay();
       this._recordMoveMeta(this.board.getRawMoveHistory().slice(-1)[0]);
+      this._recordMoveSnapshot(fromRow, fromCol, toRow, toCol);
+
+      // Always advance to the new latest position
+      this._navigateTo(this.moveSnapshots.length - 1);
 
       this._updateTurnIndicator();
     });
@@ -296,10 +316,11 @@ export class ChessApp {
     this._hideChallengeModal();
 
     // Hook up board callbacks
-    this.board.onMove = (fromRow, fromCol, toRow, toCol) => {
+    this.board.onMove = (fromRow, fromCol, toRow, toCol, promotion) => {
       this.socket.emit('make_move', {
         matchId: this.activeMatch.matchId,
-        fromRow, fromCol, toRow, toCol
+        fromRow, fromCol, toRow, toCol,
+        promotion
       });
 
       // Apply increment
@@ -307,6 +328,8 @@ export class ChessApp {
       this._updateTimerDisplay();
       this._recordMoveMeta(this.board.getRawMoveHistory().slice(-1)[0]);
       this._updateMaterialDisplay();
+      this._recordMoveSnapshot(fromRow, fromCol, toRow, toCol);
+      this._navigateTo(this.moveSnapshots.length - 1);
       
       this._updateTurnIndicator();
     };
@@ -343,9 +366,9 @@ export class ChessApp {
       `<div class="avatar-placeholder">${opponent.emoji}</div>`;
     document.getElementById('opponent-avatar').className = 'avatar-wrapper online';
 
-    // Toggle UI: Players list -> Chat
+    // Toggle UI: Players list -> Match view (navigator + chat)
     const lobbyPlayersView = document.getElementById('lobby-players-view');
-    const gameChatView = document.getElementById('game-chat-view');
+    const gameMatchView = document.getElementById('game-match-view');
     const chatMessages = document.getElementById('chat-messages');
     const sectionVariant = document.getElementById('section-variant');
     const sectionTime = document.getElementById('section-time');
@@ -353,8 +376,19 @@ export class ChessApp {
     if (lobbyPlayersView) lobbyPlayersView.classList.add('hidden');
     if (sectionVariant) sectionVariant.classList.add('hidden');
     if (sectionTime) sectionTime.classList.add('hidden');
-    if (gameChatView) gameChatView.classList.remove('hidden');
+    if (gameMatchView) gameMatchView.classList.remove('hidden');
     if (chatMessages) chatMessages.innerHTML = '';
+
+    // Initialize move history snapshots
+    this.moveSnapshots = [{
+      boardState: this.board.boardState.map(r => [...r]),
+      activeTurn: 'white',
+      lastMoveFrom: null,
+      lastMoveTo: null
+    }];
+    this.navIndex = 0;
+    this._updateNavigator();
+    this._setupNavigatorButtons();
 
     // Show action bar
     document.getElementById('game-actions').classList.remove('hidden');
@@ -368,8 +402,8 @@ export class ChessApp {
 
     // Initialize Timers
     const seconds = timeSeconds || 180;
-    this.timers = { white: seconds, black: seconds };
-    this._updateTimerDisplay();
+    this.timersMs = { white: seconds * 1000, black: seconds * 1000 };
+    this._updateTimerDisplay(this.timersMs);
     this._startTimer();
 
     // Update turn indicators
@@ -390,16 +424,18 @@ export class ChessApp {
     document.getElementById('opponent-avatar').innerHTML = '<div class="avatar-placeholder">👤</div>';
     document.getElementById('opponent-avatar').className = 'avatar-wrapper offline';
 
-    // Toggle UI: Chat -> Players list
+    // Toggle UI: Match view -> Players list
     const lobbyPlayersView = document.getElementById('lobby-players-view');
-    const gameChatView = document.getElementById('game-chat-view');
+    const gameMatchView = document.getElementById('game-match-view');
     const sectionVariant = document.getElementById('section-variant');
     const sectionTime = document.getElementById('section-time');
     
     if (lobbyPlayersView) lobbyPlayersView.classList.remove('hidden');
     if (sectionVariant) sectionVariant.classList.remove('hidden');
     if (sectionTime) sectionTime.classList.remove('hidden');
-    if (gameChatView) gameChatView.classList.add('hidden');
+    if (gameMatchView) gameMatchView.classList.add('hidden');
+    this.moveSnapshots = [];
+    this.navIndex = 0;
 
     // Hide action bar
     document.getElementById('game-actions').classList.add('hidden');
@@ -409,11 +445,128 @@ export class ChessApp {
 
     // Stop Timers
     clearInterval(this.timerInterval);
+    this.lastTurnTimestamp = null;
 
     // Clear turn indicators
     document.getElementById('user-timer').classList.remove('active');
     document.getElementById('opponent-timer').classList.remove('active');
     this._updateTimerDisplay();
+  }
+
+  // ─── Move Navigator ─────────────────────────────────────────────────────────
+
+  _recordMoveSnapshot(fromRow, fromCol, toRow, toCol) {
+    if (!this.moveSnapshots) return;
+    this.moveSnapshots.push({
+      boardState: this.board.boardState.map(r => [...r]),
+      activeTurn: this.board.activeTurn,
+      lastMoveFrom: { row: fromRow, col: fromCol },
+      lastMoveTo: { row: toRow, col: toCol }
+    });
+  }
+
+  _setupNavigatorButtons() {
+    const bindOnce = (id, fn) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      // Clone to remove old listeners
+      const fresh = el.cloneNode(true);
+      el.parentNode.replaceChild(fresh, el);
+      fresh.addEventListener('click', fn);
+    };
+    bindOnce('nav-start', () => this._navigateTo(0));
+    bindOnce('nav-prev',  () => this._navigateTo(Math.max(0, this.navIndex - 1)));
+    bindOnce('nav-next',  () => this._navigateTo(Math.min(this.moveSnapshots.length - 1, this.navIndex + 1)));
+    bindOnce('nav-end',   () => this._navigateTo(this.moveSnapshots.length - 1));
+  }
+
+  _navigateTo(index) {
+    if (!this.moveSnapshots || this.moveSnapshots.length === 0) return;
+    index = Math.max(0, Math.min(index, this.moveSnapshots.length - 1));
+    this.navIndex = index;
+
+    const snap = this.moveSnapshots[index];
+    // Update board visuals without firing callbacks or mutating game state
+    this.board.boardState = snap.boardState.map(r => [...r]);
+    this.board.activeTurn = snap.activeTurn;
+    this.board._clearLastMoveHighlights();
+    this.board.clearHighlights();
+    this.board.render();
+
+    // Highlight the move that led to this snapshot
+    if (snap.lastMoveFrom && snap.lastMoveTo) {
+      this.board.squares[snap.lastMoveFrom.row][snap.lastMoveFrom.col].classList.add('last-move');
+      this.board.squares[snap.lastMoveTo.row][snap.lastMoveTo.col].classList.add('last-move');
+    }
+
+    // Lock/unlock board: only playable when on the live position
+    const isLive = index === this.moveSnapshots.length - 1;
+    this.board.setInteractable(isLive && !!this.activeMatch);
+
+    this._updateNavigator();
+  }
+
+  _updateNavigator() {
+    const total = (this.moveSnapshots?.length ?? 1) - 1; // number of moves
+    const current = this.navIndex ?? 0;
+
+    // Update button disabled states
+    const startBtn = document.getElementById('nav-start');
+    const prevBtn  = document.getElementById('nav-prev');
+    const nextBtn  = document.getElementById('nav-next');
+    const endBtn   = document.getElementById('nav-end');
+
+    if (startBtn) startBtn.disabled = current === 0;
+    if (prevBtn)  prevBtn.disabled  = current === 0;
+    if (nextBtn)  nextBtn.disabled  = current === total;
+    if (endBtn)   endBtn.disabled   = current === total;
+
+    // Update move list chip highlights
+    const moveHistory = this.board.getRawMoveHistory();
+    const moveListEl = document.getElementById('move-list');
+    if (!moveListEl) return;
+
+    moveListEl.innerHTML = '';
+
+    // Render pairs of moves as move numbers
+    for (let i = 0; i < moveHistory.length; i++) {
+      const moveNum = Math.floor(i / 2) + 1;
+      const isWhiteMove = i % 2 === 0;
+      const mv = moveHistory[i];
+      const snapshotIndex = i + 1; // snapshot 0 = start, snapshot n = after move n
+
+      if (isWhiteMove) {
+        const numLabel = document.createElement('span');
+        numLabel.className = 'move-num';
+        numLabel.textContent = `${moveNum}.`;
+        moveListEl.appendChild(numLabel);
+      }
+
+      const label = mv.castling || `${mv.from}${mv.to}${mv.promotion ? '=' + mv.promotion : ''}`;
+      const chip = document.createElement('button');
+      chip.className = 'move-chip' + (snapshotIndex === current ? ' active' : '');
+      chip.textContent = label;
+      chip.addEventListener('click', () => this._navigateTo(snapshotIndex));
+      moveListEl.appendChild(chip);
+    }
+
+    // Shift the whole list via translateX so the active chip is centred
+    // inside the clipping track. Using transform avoids the scrollLeft
+    // limitation (overflow:hidden creates no real scroll container).
+    requestAnimationFrame(() => {
+      const activeChip = moveListEl.querySelector('.move-chip.active');
+      const trackWidth = moveListEl.parentElement.offsetWidth; // .move-list-track
+
+      if (activeChip && trackWidth > 0) {
+        // offsetLeft is relative to the flex container (no positioned ancestor
+        // between the chip and the list, so it measures from the list's left edge).
+        const chipCenter = activeChip.offsetLeft + activeChip.offsetWidth / 2;
+        const tx = trackWidth / 2 - chipCenter;
+        moveListEl.style.transform = `translateX(${tx}px)`;
+      } else {
+        moveListEl.style.transform = 'translateX(0)';
+      }
+    });
   }
 
   // ─── Chat ──────────────────────────────────────────────────────────────────
@@ -481,14 +634,19 @@ export class ChessApp {
   _startTimer() {
     clearInterval(this.timerInterval);
     this.timerInterval = setInterval(() => {
-      const activeColor = this.board.activeTurn;
-      this.timers[activeColor]--;
+      if (!this.activeMatch) return;
 
-      if (this.timers[activeColor] <= 0) {
-        this.timers[activeColor] = 0;
-        clearInterval(this.timerInterval);
-        
-        // Timeout
+      const activeColor = this.board.activeTurn;
+      const now = Date.now();
+      const elapsedSinceTurnStart = now - this.lastTurnTimestamp;
+      
+      const currentTimersMs = {
+        white: activeColor === 'white' ? Math.max(0, this.timersMs.white - elapsedSinceTurnStart) : this.timersMs.white,
+        black: activeColor === 'black' ? Math.max(0, this.timersMs.black - elapsedSinceTurnStart) : this.timersMs.black
+      };
+
+      // Timeout detection (redundant check, server is authoritative)
+      if (currentTimersMs[activeColor] <= 0) {
         if (activeColor === this.board.playerColor) {
           this.socket.emit('game_over', {
             matchId: this.activeMatch.matchId,
@@ -496,14 +654,16 @@ export class ChessApp {
             reason: 'timeout'
           });
         }
-      } else if (this.timers[activeColor] <= 10) {
+      } else if (Math.floor(currentTimersMs[activeColor] / 1000) <= 10 && currentTimersMs[activeColor] % 1000 < 50) {
+        // Warning sound every second when < 10s
         this.board.playSynthSound('warning');
       }
-      this._updateTimerDisplay();
-    }, 1000);
+      
+      this._updateTimerDisplay(currentTimersMs);
+    }, 50); // High frequency update for decimal precision
   }
 
-  _updateTimerDisplay() {
+  _updateTimerDisplay(currentTimersMs) {
     if (!this.activeMatch) {
       document.getElementById('user-timer').innerText = '—';
       document.getElementById('opponent-timer').innerText = '—';
@@ -511,18 +671,32 @@ export class ChessApp {
       document.getElementById('opponent-timer').classList.remove('running-down');
       return;
     }
-    const format = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+
+    const format = (ms) => {
+      const totalSeconds = ms / 1000;
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = Math.floor(totalSeconds % 60);
+      
+      if (totalSeconds < 10) {
+        // Show one decimal point when less than 10 seconds
+        return `${seconds}.${Math.floor((ms % 1000) / 100)}`;
+      }
+      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    };
+
     const isWhite = this.board.playerColor === 'white';
-    const myTimer = isWhite ? this.timers.white : this.timers.black;
-    const opponentTimer = isWhite ? this.timers.black : this.timers.white;
+    const myMs = isWhite ? currentTimersMs.white : currentTimersMs.black;
+    const opponentMs = isWhite ? currentTimersMs.black : currentTimersMs.white;
+    
     const myEl = document.getElementById('user-timer');
     const oppEl = document.getElementById('opponent-timer');
 
-    myEl.innerText = format(myTimer);
-    oppEl.innerText = format(opponentTimer);
+    myEl.innerText = format(myMs);
+    oppEl.innerText = format(opponentMs);
 
-    myEl.classList.toggle('running-down', this.board.activeTurn === this.board.playerColor && myTimer <= 15 && myTimer > 0);
-    oppEl.classList.toggle('running-down', this.board.activeTurn !== this.board.playerColor && opponentTimer <= 15 && opponentTimer > 0);
+    const activeColor = this.board.activeTurn;
+    myEl.classList.toggle('running-down', activeColor === this.board.playerColor && myMs <= 15000);
+    oppEl.classList.toggle('running-down', activeColor !== this.board.playerColor && opponentMs <= 15000);
   }
 
   _updateTurnIndicator() {
@@ -737,8 +911,14 @@ export class ChessApp {
 
   _recordMoveMeta(move) {
     const moveColor = move.piece === move.piece.toUpperCase() ? 'white' : 'black';
-    const clock = this._formatClock(this.timers[moveColor]);
-    this.pgnMoves.push({ move, color: moveColor, clock });
+    const activeColor = this.board.activeTurn;
+    const now = Date.now();
+    const elapsed = now - this.lastTurnTimestamp;
+    
+    // Approximate clock at the time of the move for PGN
+    const remainingMs = this.timersMs[moveColor] - elapsed;
+    const clock = this._formatClock(Math.max(0, Math.floor(remainingMs / 1000)));
+    this.pgnMoves.push({ move, color: moveColor, clock, remainingMs: Math.max(0, remainingMs) });
   }
 
   _formatMaterialBadge(value) {
@@ -815,8 +995,14 @@ export class ChessApp {
       .replace(/\}/g, '\\}');
   }
 
-  _formatPgnComment(clock) {
-    return clock ? ` {[%clk ${clock}]}` : '';
+  _formatPgnComment(ms) {
+    if (!ms && ms !== 0) return '';
+    const s = ms / 1000;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const secs = (s % 60).toFixed(1);
+    const timeStr = `${h}:${m.toString().padStart(2, '0')}:${secs.padStart(4, '0')}`;
+    return ` {[%clk ${timeStr}]}`;
   }
 
   _formatChatComment(entry) {
@@ -835,8 +1021,8 @@ export class ChessApp {
 
       const whiteSan = whiteMeta && whiteMeta.move ? this._getSan(whiteMeta.move, temp) : '';
       const blackSan = blackMeta && blackMeta.move ? this._getSan(blackMeta.move, temp) : '';
-      const whiteClock = whiteMeta ? this._formatPgnComment(whiteMeta.clock) : '';
-      const blackClock = blackMeta ? this._formatPgnComment(blackMeta.clock) : '';
+      const whiteClock = whiteMeta ? this._formatPgnComment(whiteMeta.remainingMs) : '';
+      const blackClock = blackMeta ? this._formatPgnComment(blackMeta.remainingMs) : '';
       const pairComments = this.chatLog
         .filter(entry => entry.moveIndex === i || entry.moveIndex === i + 1)
         .map(entry => this._formatChatComment(entry))

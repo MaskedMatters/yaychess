@@ -55,6 +55,19 @@ export class ChessBoard {
     this.audioCtx = null;
     this.soundEnabled = true;
     this.gameState = this._createInitialGameState();
+    this.premoveQueue = [];
+    this.virtualBoardState = null;
+
+    // Drag and drop state
+    this.dragInfo = null; // { row, col, piece, element, startX, startY }
+    this._handleMouseMove = this.handleMouseMove.bind(this);
+    this._handleMouseUp = this.handleMouseUp.bind(this);
+
+    // Right-click visuals state
+    this.rightClickDragInfo = null; // { startRow, startCol }
+    this.arrows = []; // [{ fromRow, fromCol, toRow, toCol }]
+    this._handleRightClickMove = this.handleRightClickMove.bind(this);
+    this._handleRightClickEnd = this.handleRightClickEnd.bind(this);
   }
 
   _createInitialGameState() {
@@ -75,6 +88,13 @@ export class ChessBoard {
   init() {
     this.boardEl.innerHTML = '';
 
+    // Create SVG overlay for arrows
+    this.svgOverlay = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.svgOverlay.setAttribute('class', 'arrows-overlay');
+    this.boardEl.appendChild(this.svgOverlay);
+
+    this.boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
+
     const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
     const ranks = ['8', '7', '6', '5', '4', '3', '2', '1'];
 
@@ -91,6 +111,7 @@ export class ChessBoard {
 
         this.squares[r][c] = squareEl;
         squareEl.addEventListener('click', () => this.handleSquareClick(r, c));
+        squareEl.addEventListener('mousedown', (e) => this.handleMouseDown(e, r, c));
         this.boardEl.appendChild(squareEl);
       }
     }
@@ -100,11 +121,18 @@ export class ChessBoard {
   }
 
   // Render piece images onto squares
-  render() {
+  render(skipSquare = null) {
+    const displayState = this.virtualBoardState || this.boardState;
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
+        if (skipSquare && skipSquare.r === r && skipSquare.c === c) {
+          const oldImg = this.squares[r][c].querySelector('.piece');
+          if (oldImg) oldImg.remove();
+          continue;
+        }
+
         const squareEl = this.squares[r][c];
-        const piece = this.boardState[r][c];
+        const piece = displayState[r][c];
 
         const oldImg = squareEl.querySelector('.piece');
         if (oldImg) oldImg.remove();
@@ -121,16 +149,354 @@ export class ChessBoard {
     }
   }
 
-  handleSquareClick(row, col) {
-    // Board is locked unless this client is playing and it is their turn
+  handleMouseDown(e, row, col) {
     if (!this.interactable) return;
-    if (this.activeTurn !== this.playerColor) return;
+
+    // Left click
+    if (e.button === 0) {
+      this.clearRightClickVisuals();
+      
+      const displayState = this.virtualBoardState || this.boardState;
+      const piece = displayState[row][col];
+      if (!piece) return;
+
+      const isWhitePiece = piece === piece.toUpperCase();
+      const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
+                        (this.playerColor === 'black' && !isWhitePiece);
+      if (!isMyPiece) return;
+
+      // Start drag
+      this.dragInfo = {
+        row, col, piece,
+        element: null,
+        startX: e.clientX,
+        startY: e.clientY
+      };
+
+      // Track if this mousedown actually selects a new piece
+      const alreadySelected = this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col;
+      this.handleSquareClick(row, col, true);
+      this._selectionChangedOnMousedown = (!alreadySelected && this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col);
+
+      window.addEventListener('mousemove', this._handleMouseMove);
+      window.addEventListener('mouseup', this._handleMouseUp);
+    }
+    // Right click
+    else if (e.button === 2) {
+      this.rightClickDragInfo = { startRow: row, startCol: col };
+      window.addEventListener('mousemove', this._handleRightClickMove);
+      window.addEventListener('mouseup', this._handleRightClickEnd);
+    }
+  }
+
+  handleRightClickMove(e) {
+    if (!this.rightClickDragInfo) return;
+
+    const squareAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+    const targetSquare = squareAtPoint?.closest('.square');
+    
+    // Preview current arrow
+    this.renderArrows();
+    if (targetSquare) {
+      const targetRow = parseInt(targetSquare.dataset.row);
+      const targetCol = parseInt(targetSquare.dataset.col);
+      if (targetRow !== this.rightClickDragInfo.startRow || targetCol !== this.rightClickDragInfo.startCol) {
+        this._drawArrow(this.rightClickDragInfo.startRow, this.rightClickDragInfo.startCol, targetRow, targetCol, true);
+      }
+    }
+  }
+
+  handleRightClickEnd(e) {
+    if (!this.rightClickDragInfo) return;
+
+    window.removeEventListener('mousemove', this._handleRightClickMove);
+    window.removeEventListener('mouseup', this._handleRightClickEnd);
+
+    const squareAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+    const targetSquare = squareAtPoint?.closest('.square');
+
+    if (targetSquare) {
+      const targetRow = parseInt(targetSquare.dataset.row);
+      const targetCol = parseInt(targetSquare.dataset.col);
+
+      if (targetRow === this.rightClickDragInfo.startRow && targetCol === this.rightClickDragInfo.startCol) {
+        // Toggle highlight
+        targetSquare.classList.toggle('right-click-highlight');
+      } else {
+        // Add or remove arrow
+        const existingIdx = this.arrows.findIndex(a => 
+          a.fromRow === this.rightClickDragInfo.startRow && 
+          a.fromCol === this.rightClickDragInfo.startCol && 
+          a.toRow === targetRow && 
+          a.toCol === targetCol
+        );
+        if (existingIdx !== -1) {
+          this.arrows.splice(existingIdx, 1);
+        } else {
+          this.arrows.push({ 
+            fromRow: this.rightClickDragInfo.startRow, 
+            fromCol: this.rightClickDragInfo.startCol, 
+            toRow: targetRow, 
+            toCol: targetCol 
+          });
+        }
+      }
+    }
+
+    this.rightClickDragInfo = null;
+    this.renderArrows();
+  }
+
+  renderArrows() {
+    // Clear current arrows
+    while (this.svgOverlay.firstChild) {
+      this.svgOverlay.removeChild(this.svgOverlay.firstChild);
+    }
+
+    this.arrows.forEach(a => {
+      this._drawArrow(a.fromRow, a.fromCol, a.toRow, a.toCol);
+    });
+  }
+
+  _drawArrow(fromR, fromC, toR, toC, isPreview = false) {
+    const fromSq = this.squares[fromR][fromC];
+    const toSq = this.squares[toR][toC];
+    if (!fromSq || !toSq) return;
+
+    const boardRect = this.boardEl.getBoundingClientRect();
+    const fromRect = fromSq.getBoundingClientRect();
+    const toRect = toSq.getBoundingClientRect();
+
+    let x1, y1, x2, y2;
+
+    if (this.flipped) {
+      x1 = boardRect.right - (fromRect.left + fromRect.width / 2);
+      y1 = boardRect.bottom - (fromRect.top + fromRect.height / 2);
+      x2 = boardRect.right - (toRect.left + toRect.width / 2);
+      y2 = boardRect.bottom - (toRect.top + toRect.height / 2);
+    } else {
+      x1 = (fromRect.left + fromRect.width / 2) - boardRect.left;
+      y1 = (fromRect.top + fromRect.height / 2) - boardRect.top;
+      x2 = (toRect.left + toRect.width / 2) - boardRect.left;
+      y2 = (toRect.top + toRect.height / 2) - boardRect.top;
+    }
+
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const dist = Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+
+    // Arrowhead geometry: equilateral triangle
+    const headSize = fromRect.width * 0.38; // Increased from 0.3
+    const headHeight = headSize * 0.866; // s * sqrt(3)/2
+    
+    // Calculate triangle vertices
+    // Tip is exactly at target center
+    const tipX = x2;
+    const tipY = y2;
+    
+    // Center of the base
+    const baseCenterX = tipX - headHeight * Math.cos(angle);
+    const baseCenterY = tipY - headHeight * Math.sin(angle);
+    
+    // Base corners
+    const x3 = baseCenterX + (headSize / 2) * Math.sin(angle);
+    const y3 = baseCenterY - (headSize / 2) * Math.cos(angle);
+    const x4 = baseCenterX - (headSize / 2) * Math.sin(angle);
+    const y4 = baseCenterY + (headSize / 2) * Math.cos(angle);
+
+    // Create a group to handle transparency uniformly
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.setAttribute('opacity', isPreview ? '0.4' : '0.7');
+    g.style.pointerEvents = 'none';
+
+    // Draw the line (shaft)
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', x1);
+    line.setAttribute('y1', y1);
+    // Line ends slightly inside the arrowhead to ensure no gap
+    line.setAttribute('x2', baseCenterX + (headHeight * 0.2) * Math.cos(angle));
+    line.setAttribute('y2', baseCenterY + (headHeight * 0.2) * Math.sin(angle));
+    line.setAttribute('stroke', '#ff7800');
+    line.setAttribute('stroke-width', fromRect.width * 0.17); // Thinner (from 0.22)
+    line.setAttribute('stroke-linecap', 'round');
+    g.appendChild(line);
+
+    // Draw the arrowhead (triangle)
+    const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    poly.setAttribute('points', `${tipX},${tipY} ${x3},${y3} ${x4},${y4}`);
+    poly.setAttribute('fill', '#ff7800');
+    poly.setAttribute('stroke', '#ff7800');
+    poly.setAttribute('stroke-width', '2');
+    poly.setAttribute('stroke-linejoin', 'round');
+    g.appendChild(poly);
+
+    this.svgOverlay.appendChild(g);
+  }
+
+  clearRightClickVisuals() {
+    this.arrows = [];
+    this.renderArrows();
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c].classList.remove('right-click-highlight');
+      }
+    }
+  }
+
+  handleMouseMove(e) {
+    if (!this.dragInfo) return;
+
+    // Only create the floating element after a small movement threshold to allow clicks
+    if (!this.dragInfo.element) {
+      const dist = Math.sqrt(Math.pow(e.clientX - this.dragInfo.startX, 2) + Math.pow(e.clientY - this.dragInfo.startY, 2));
+      if (dist > 5) {
+        const pieceImg = this.squares[this.dragInfo.row][this.dragInfo.col].querySelector('.piece');
+        if (pieceImg) {
+          const dragEl = pieceImg.cloneNode(true);
+          dragEl.style.position = 'fixed';
+          dragEl.style.width = `${pieceImg.offsetWidth}px`;
+          dragEl.style.height = `${pieceImg.offsetHeight}px`;
+          dragEl.style.zIndex = '1000';
+          dragEl.style.pointerEvents = 'none';
+          dragEl.style.opacity = '0.8';
+          document.body.appendChild(dragEl);
+          this.dragInfo.element = dragEl;
+          pieceImg.style.opacity = '0.3'; // Dim original
+        }
+      }
+    }
+
+    if (this.dragInfo.element) {
+      this.dragInfo.element.style.left = `${e.clientX - this.dragInfo.element.offsetWidth / 2}px`;
+      this.dragInfo.element.style.top = `${e.clientY - this.dragInfo.element.offsetHeight / 2}px`;
+
+      // Visual feedback for square hover
+      const squareAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+      const targetSquare = squareAtPoint?.closest('.square');
+      
+      // Clear previous hover
+      if (this._lastHoverSquare) {
+        this._lastHoverSquare.classList.remove('drag-over');
+      }
+      
+      if (targetSquare) {
+        targetSquare.classList.add('drag-over');
+        this._lastHoverSquare = targetSquare;
+      }
+    }
+  }
+
+  async handleMouseUp(e) {
+    if (!this.dragInfo) return;
+
+    window.removeEventListener('mousemove', this._handleMouseMove);
+    window.removeEventListener('mouseup', this._handleMouseUp);
+
+    if (this._lastHoverSquare) {
+      this._lastHoverSquare.classList.remove('drag-over');
+      this._lastHoverSquare = null;
+    }
+
+    const wasDragging = !!this.dragInfo.element;
+    if (wasDragging) {
+      this.dragInfo.element.remove();
+      const originalPieceImg = this.squares[this.dragInfo.row][this.dragInfo.col].querySelector('.piece');
+      if (originalPieceImg) originalPieceImg.style.opacity = '';
+
+      // Find the square we are over
+      const squareAtPoint = document.elementFromPoint(e.clientX, e.clientY);
+      const targetSquare = squareAtPoint?.closest('.square');
+      
+      if (targetSquare) {
+        const targetRow = parseInt(targetSquare.dataset.row);
+        const targetCol = parseInt(targetSquare.dataset.col);
+        
+        // Execute move if different square
+        if (targetRow !== this.dragInfo.row || targetCol !== this.dragInfo.col) {
+          this._justDragged = true;
+          await this.handleSquareClick(targetRow, targetCol, false, true);
+        }
+      }
+    }
+
+    this.dragInfo = null;
+  }
+
+  async handleSquareClick(row, col, fromMousedown = false, forceExecute = false) {
+    // Board is locked unless this client is playing
+    if (!this.interactable) return;
+    
+    // If we just finished a drag, ignore the subsequent click event
+    if (this._justDragged && !fromMousedown && !forceExecute) {
+      this._justDragged = false;
+      return;
+    }
+
+    // If mousedown already handled the selection of this square, ignore the follow-up click
+    if (!fromMousedown && this._selectionChangedOnMousedown && 
+        this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col) {
+      this._selectionChangedOnMousedown = false;
+      return;
+    }
 
     const squareEl = this.squares[row][col];
-    const piece = this.boardState[row][col];
+    const displayState = this.virtualBoardState || this.boardState;
+    const piece = displayState[row][col];
 
+    // Premove logic: if it's NOT our turn
+    if (this.activeTurn !== this.playerColor) {
+      if (this.selectedSquare) {
+        if (this.selectedSquare.row === row && this.selectedSquare.col === col) {
+          if (fromMousedown) return; // Don't deselect on drag start
+          this.clearHighlights();
+          return;
+        }
+
+        // Only allow premoving to a "basic" valid square
+        const isValidBasicMove = this.selectedSquare.validMoves.some(m => m.r === row && m.c === col);
+        if (isValidBasicMove) {
+          // Record premove
+          await this.addPremove(this.selectedSquare.row, this.selectedSquare.col, row, col);
+        }
+        
+        this.clearHighlights();
+        return;
+      }
+
+      // Select piece for premove
+      if (!fromMousedown) this.clearHighlights();
+      if (piece) {
+        const isWhitePiece = piece === piece.toUpperCase();
+        const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
+                          (this.playerColor === 'black' && !isWhitePiece);
+        if (isMyPiece) {
+          const basicMoves = this.getBasicMovesForPiece(row, col, piece);
+          this.selectedSquare = { row, col, piece, validMoves: basicMoves };
+          squareEl.classList.add('selected');
+          this.playSynthSound('select');
+
+          // Show highlights for premove (simplified dots)
+          if (document.getElementById('highlight-setting')?.checked) {
+            basicMoves.forEach(move => {
+              const cell = this.squares[move.r][move.c];
+              cell.classList.add('highlight-move');
+              const dot = document.createElement('span');
+              dot.className = 'move-dot';
+              cell.appendChild(dot);
+            });
+          }
+        } else {
+          this.clearPremoves();
+        }
+      } else {
+        this.clearPremoves();
+      }
+      return;
+    }
+
+    // Normal move logic
     // Deselect on same square click
     if (this.selectedSquare && this.selectedSquare.row === row && this.selectedSquare.col === col) {
+      if (fromMousedown) return; // Don't deselect on drag start
       this.clearHighlights();
       return;
     }
@@ -139,13 +505,15 @@ export class ChessBoard {
     if (this.selectedSquare) {
       const isValid = this.selectedSquare.validMoves.some(m => m.r === row && m.c === col);
       if (isValid) {
-        this.executeMove(this.selectedSquare.row, this.selectedSquare.col, row, col, true);
+        const animate = !this._justDragged;
+        await this.executeMove(this.selectedSquare.row, this.selectedSquare.col, row, col, true, animate);
+        this._justDragged = false;
         return;
       }
     }
 
     // Select piece — only if it belongs to the active player's color
-    this.clearHighlights();
+    if (!fromMousedown) this.clearHighlights();
     if (piece) {
       const isWhitePiece = piece === piece.toUpperCase();
       const isMyPiece = (this.playerColor === 'white' && isWhitePiece) ||
@@ -175,9 +543,11 @@ export class ChessBoard {
   }
 
   // Execute a move — local flag determines if we fire the onMove callback
-  executeMove(fromRow, fromCol, toRow, toCol, isLocal = false) {
+  async executeMove(fromRow, fromCol, toRow, toCol, isLocal = false, animate = true, promotionPiece = null) {
     const piece = this.boardState[fromRow][fromCol];
     const captured = this.boardState[toRow][toCol];
+    if (!piece) return;
+
     const isPawn = piece.toLowerCase() === 'p';
     const isKing = piece.toLowerCase() === 'k';
     const isRook = piece.toLowerCase() === 'r';
@@ -185,6 +555,57 @@ export class ChessBoard {
     const opponent = color === 'white' ? 'black' : 'white';
     const moveNotation = { piece, from: this._positionToAlgebraic(fromRow, fromCol), to: this._positionToAlgebraic(toRow, toCol) };
 
+    const fromSq = this.squares[fromRow][fromCol];
+    const toSq = this.squares[toRow][toCol];
+
+    // Handle local promotion choice
+    let promo = promotionPiece;
+    if (isLocal && isPawn && (toRow === 0 || toRow === 7) && !promo) {
+      promo = await this.promptPromotion(color);
+    }
+
+    if (animate) {
+      const fromRect = fromSq.getBoundingClientRect();
+      const toRect = toSq.getBoundingClientRect();
+      const boardRect = this.boardEl.getBoundingClientRect();
+
+      const pieceImg = fromSq.querySelector('.piece');
+      if (pieceImg) {
+        const clone = pieceImg.cloneNode(true);
+        clone.style.position = 'fixed';
+        clone.style.left = `${fromRect.left}px`;
+        clone.style.top = `${fromRect.top}px`;
+        clone.style.width = `${fromRect.width}px`;
+        clone.style.height = `${fromRect.height}px`;
+        clone.style.zIndex = '500';
+        clone.style.transition = 'all 0.25s cubic-bezier(0.2, 0, 0.2, 1)';
+        clone.style.pointerEvents = 'none';
+        document.body.appendChild(clone);
+
+        // Actual state update
+        this._finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal, promo);
+        
+        // Hide destination piece during animation
+        this.render({ r: toRow, c: toCol });
+
+        requestAnimationFrame(() => {
+          clone.style.left = `${toRect.left}px`;
+          clone.style.top = `${toRect.top}px`;
+        });
+
+        setTimeout(() => {
+          clone.remove();
+          this.render();
+        }, 250);
+        return;
+      }
+    }
+
+    this._finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal, promo);
+    this.render();
+  }
+
+  _finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal, promotionPiece = null) {
     // Handle en passant capture
     if (isPawn && this.gameState.enPassantTarget) {
       const [epR, epC] = this._algebraicToPosition(this.gameState.enPassantTarget);
@@ -210,10 +631,11 @@ export class ChessBoard {
     this.boardState[toRow][toCol] = piece;
     this.boardState[fromRow][fromCol] = '';
 
-    // Automatic promotion to queen
+    // Handle promotion
     if (isPawn && (toRow === 0 || toRow === 7)) {
-      this.boardState[toRow][toCol] = color === 'white' ? 'Q' : 'q';
-      moveNotation.promotion = 'Q';
+      const promo = promotionPiece || 'Q';
+      this.boardState[toRow][toCol] = color === 'white' ? promo.toUpperCase() : promo.toLowerCase();
+      moveNotation.promotion = promo.toUpperCase();
     }
 
     // Castling rights update
@@ -262,8 +684,9 @@ export class ChessBoard {
     moveNotation.capture = !!captured || !!moveNotation.enPassant;
     this.gameState.moveHistory.push(moveNotation);
 
+    this.clearRightClickVisuals();
+    this._clearLastMoveHighlights();
     this.clearHighlights();
-    this.render();
 
     this.squares[fromRow][fromCol].classList.add('last-move');
     this.squares[toRow][toCol].classList.add('last-move');
@@ -273,9 +696,12 @@ export class ChessBoard {
     // Switch active turn
     this.activeTurn = this.activeTurn === 'white' ? 'black' : 'white';
 
+    // Try to play next premove if it's now our turn
+    this.tryPlayPremove();
+
     // Fire callback so app.js can relay move via socket FIRST
     if (isLocal && this.onMove) {
-      this.onMove(fromRow, fromCol, toRow, toCol);
+      this.onMove(fromRow, fromCol, toRow, toCol, moveNotation.promotion);
     }
 
     // Check for check/checkmate
@@ -291,11 +717,131 @@ export class ChessBoard {
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
         const sq = this.squares[r][c];
-        sq.classList.remove('selected', 'highlight-move', 'highlight-capture', 'last-move');
+        sq.classList.remove('selected', 'highlight-move', 'highlight-capture');
         const dot = sq.querySelector('.move-dot');
         if (dot) dot.remove();
       }
     }
+    this._refreshPremoveHighlights();
+  }
+
+  _clearLastMoveHighlights() {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c].classList.remove('last-move');
+      }
+    }
+  }
+
+  promptPromotion(color) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('promotion-modal');
+      const container = document.getElementById('promotion-options');
+      container.innerHTML = '';
+
+      const pieces = [
+        { type: 'Q', label: 'Queen' },
+        { type: 'R', label: 'Rook' },
+        { type: 'B', label: 'Bishop' },
+        { type: 'N', label: 'Knight' }
+      ];
+
+      pieces.forEach(p => {
+        const char = color === 'white' ? p.type : p.type.toLowerCase();
+        const btn = document.createElement('button');
+        btn.className = 'promo-btn';
+        btn.innerHTML = `
+          <img src="${this.pieceImages[char]}" class="promo-img">
+          <span class="promo-label">${p.label}</span>
+        `;
+        btn.onclick = () => {
+          modal.classList.add('hidden');
+          resolve(p.type);
+        };
+        container.appendChild(btn);
+      });
+
+      modal.classList.remove('hidden');
+    });
+  }
+
+  async addPremove(fromR, fromC, toR, toC) {
+    if (!this.virtualBoardState) {
+      this.virtualBoardState = this.boardState.map(r => [...r]);
+    }
+    
+    // Visually move the piece in the virtual board
+    let piece = this.virtualBoardState[fromR][fromC];
+    let promotion = null;
+    
+    // Handle virtual promotion for pawns reaching the last rank
+    if (piece.toLowerCase() === 'p' && (toR === 0 || toR === 7)) {
+      const color = piece === 'P' ? 'white' : 'black';
+      promotion = await this.promptPromotion(color);
+      piece = color === 'white' ? promotion.toUpperCase() : promotion.toLowerCase();
+    }
+
+    this.virtualBoardState[toR][toC] = piece;
+    this.virtualBoardState[fromR][fromC] = '';
+
+    this.premoveQueue.push({ fromR, fromC, toR, toC, promotion });
+    this._refreshPremoveHighlights();
+    this.render();
+    this.playSynthSound('move');
+  }
+
+  clearPremoves() {
+    this.premoveQueue = [];
+    this.virtualBoardState = null;
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c].classList.remove('premove');
+      }
+    }
+    this.render();
+  }
+
+  tryPlayPremove() {
+    if (this.activeTurn !== this.playerColor || this.premoveQueue.length === 0) {
+      this.virtualBoardState = null; // Sync back to real board when turn starts or queue empty
+      this.render();
+      return;
+    }
+
+    const move = this.premoveQueue.shift();
+    const piece = this.boardState[move.fromR][move.fromC];
+    
+    if (!piece) {
+      this.clearPremoves();
+      return;
+    }
+
+    const legalMoves = this.getLegalMovesForPiece(move.fromR, move.fromC, piece);
+    const isLegal = legalMoves.some(m => m.r === move.toR && m.c === move.toC);
+
+    if (isLegal) {
+      // Small delay to make it feel smoother if it's right after an opponent move
+      setTimeout(() => {
+        this.executeMove(move.fromR, move.fromC, move.toR, move.toC, true, true, move.promotion);
+      }, 100);
+    } else {
+      this.clearPremoves();
+    }
+  }
+
+  _refreshPremoveHighlights() {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        this.squares[r][c].classList.remove('premove');
+      }
+    }
+    if (!this.interactable) return;
+
+    this.premoveQueue.forEach(m => {
+      // Always highlight the original from/to squares for each premove in the chain
+      this.squares[m.fromR][m.fromC].classList.add('premove');
+      this.squares[m.toR][m.toC].classList.add('premove');
+    });
   }
 
   resetBoard() {
@@ -311,6 +857,7 @@ export class ChessBoard {
     ];
     this.activeTurn = 'white';
     this.gameState = this._createInitialGameState();
+    this.clearPremoves();
     this.clearHighlights();
     this.render();
   }
@@ -318,6 +865,7 @@ export class ChessBoard {
   setInteractable(interactable, playerColor = null) {
     this.interactable = interactable;
     if (playerColor) this.playerColor = playerColor;
+    this._refreshPremoveHighlights();
     this._updateBoardCursor();
   }
 
@@ -361,6 +909,64 @@ export class ChessBoard {
   setOrientation(color) {
     this.flipped = (color === 'black');
     this.boardEl.classList.toggle('flipped', this.flipped);
+  }
+
+  // ─── Simplified Move Calculation for Premoves ─────────────────────────────
+  // Returns all squares a piece could fundamentally reach on a blank board.
+  getBasicMovesForPiece(row, col, piece) {
+    const isWhite = piece === piece.toUpperCase();
+    const type = piece.toLowerCase();
+    const moves = [];
+
+    const addIfValid = (r, c) => {
+      if (r >= 0 && r < 8 && c >= 0 && c < 8) {
+        moves.push({ r, c });
+        return true;
+      }
+      return false;
+    };
+
+    switch (type) {
+      case 'p': {
+        const dir = isWhite ? -1 : 1;
+        addIfValid(row + dir, col);     // Forward
+        addIfValid(row + dir, col - 1); // Diagonal capture
+        addIfValid(row + dir, col + 1); // Diagonal capture
+        // Allow double push if at starting rank
+        if ((isWhite && row === 6) || (!isWhite && row === 1)) {
+          addIfValid(row + dir * 2, col);
+        }
+        break;
+      }
+      case 'n': {
+        [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([dr, dc]) => {
+          addIfValid(row + dr, col + dc);
+        });
+        break;
+      }
+      case 'b':
+        for (let i = 1; i < 8; i++) {
+          [[-1,-1],[-1,1],[1,-1],[1,1]].forEach(([dr, dc]) => addIfValid(row + dr * i, col + dc * i));
+        }
+        break;
+      case 'r':
+        for (let i = 1; i < 8; i++) {
+          [[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr, dc]) => addIfValid(row + dr * i, col + dc * i));
+        }
+        break;
+      case 'q':
+        for (let i = 1; i < 8; i++) {
+          [[-1,-1],[-1,1],[1,-1],[1,1],[-1,0],[1,0],[0,-1],[0,1]].forEach(([dr, dc]) => addIfValid(row + dr * i, col + dc * i));
+        }
+        break;
+      case 'k': {
+        [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([dr, dc]) => {
+          addIfValid(row + dr, col + dc);
+        });
+        break;
+      }
+    }
+    return moves;
   }
 
   // ─── Move Calculation ──────────────────────────────────────────────────────
