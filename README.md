@@ -1,4 +1,4 @@
-# ♟️ YayChess
+# ♟️ YayChess (DOCS OUTDATED)
 
 YayChess is a premium, real-time online multiplayer chess application designed with a focus on stunning aesthetics, smooth animations, and competitive integrity. Built with Node.js and Socket.io, it provides a seamless matchmaking experience and robust chess logic.
 
