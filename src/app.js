@@ -60,6 +60,7 @@ export class ChessApp {
     this.onlinePlayers = [];
 
     this.selectedColor = 'random';
+    this.timers = { white: 0, black: 0 };
     this.incrementSeconds = 0;
     this.timerInterval = null;
     this._lastChallengedSocketId = null;
@@ -69,10 +70,6 @@ export class ChessApp {
     this.matchTimeControl = { initial: 0, increment: 0 };
     this.matchResult = '*';
     this.matchTermination = 'unfinished';
-
-    // Authoritative timer state
-    this.lastTurnTimestamp = null;
-    this.timersMs = { white: 0, black: 0 };
   }
 
   init() {
@@ -143,11 +140,9 @@ export class ChessApp {
     });
 
     // Match started
-    this.socket.on('match_started', ({ matchId, color, opponent, timeSeconds, incrementSeconds, lastTurnTimestamp }) => {
+    this.socket.on('match_started', ({ matchId, color, opponent, timeSeconds, incrementSeconds }) => {
       this._hideChallengeModal();
       this.activeMatch = { matchId, color, opponent };
-      this.lastTurnTimestamp = lastTurnTimestamp;
-      this.timersMs = { white: timeSeconds * 1000, black: timeSeconds * 1000 };
       this._startMatch(color, opponent, timeSeconds, incrementSeconds);
     });
 
@@ -160,11 +155,7 @@ export class ChessApp {
     });
 
     // Incoming move from opponent
-    this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol, promotion, timers, lastTurnTimestamp, activeTurn }) => {
-      // Sync authoritative state
-      if (timers) this.timersMs = timers;
-      if (lastTurnTimestamp) this.lastTurnTimestamp = lastTurnTimestamp;
-
+    this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol, promotion }) => {
       // If the viewer is browsing history, the board's visual state is a past
       // snapshot. We must restore the real live position before executing the
       // move, otherwise executeMove will operate on stale/incorrect data.
@@ -177,7 +168,9 @@ export class ChessApp {
       this.board.executeMove(fromRow, fromCol, toRow, toCol, false, true, promotion);
       this._updateMaterialDisplay();
 
-      // We no longer manually add increment here as server sends authoritative timers
+      // Apply increment to opponent
+      const opponentColor = this.board.playerColor === 'white' ? 'black' : 'white';
+      this.timers[opponentColor] += this.incrementSeconds;
       this._updateTimerDisplay();
       this._recordMoveMeta(this.board.getRawMoveHistory().slice(-1)[0]);
       this._recordMoveSnapshot(fromRow, fromCol, toRow, toCol);
@@ -402,8 +395,8 @@ export class ChessApp {
 
     // Initialize Timers
     const seconds = timeSeconds || 180;
-    this.timersMs = { white: seconds * 1000, black: seconds * 1000 };
-    this._updateTimerDisplay(this.timersMs);
+    this.timers = { white: seconds, black: seconds };
+    this._updateTimerDisplay();
     this._startTimer();
 
     // Update turn indicators
@@ -445,7 +438,6 @@ export class ChessApp {
 
     // Stop Timers
     clearInterval(this.timerInterval);
-    this.lastTurnTimestamp = null;
 
     // Clear turn indicators
     document.getElementById('user-timer').classList.remove('active');
@@ -634,19 +626,14 @@ export class ChessApp {
   _startTimer() {
     clearInterval(this.timerInterval);
     this.timerInterval = setInterval(() => {
-      if (!this.activeMatch) return;
-
       const activeColor = this.board.activeTurn;
-      const now = Date.now();
-      const elapsedSinceTurnStart = now - this.lastTurnTimestamp;
-      
-      const currentTimersMs = {
-        white: activeColor === 'white' ? Math.max(0, this.timersMs.white - elapsedSinceTurnStart) : this.timersMs.white,
-        black: activeColor === 'black' ? Math.max(0, this.timersMs.black - elapsedSinceTurnStart) : this.timersMs.black
-      };
+      this.timers[activeColor]--;
 
-      // Timeout detection (redundant check, server is authoritative)
-      if (currentTimersMs[activeColor] <= 0) {
+      if (this.timers[activeColor] <= 0) {
+        this.timers[activeColor] = 0;
+        clearInterval(this.timerInterval);
+        
+        // Timeout
         if (activeColor === this.board.playerColor) {
           this.socket.emit('game_over', {
             matchId: this.activeMatch.matchId,
@@ -654,16 +641,14 @@ export class ChessApp {
             reason: 'timeout'
           });
         }
-      } else if (Math.floor(currentTimersMs[activeColor] / 1000) <= 10 && currentTimersMs[activeColor] % 1000 < 50) {
-        // Warning sound every second when < 10s
+      } else if (this.timers[activeColor] <= 10) {
         this.board.playSynthSound('warning');
       }
-      
-      this._updateTimerDisplay(currentTimersMs);
-    }, 50); // High frequency update for decimal precision
+      this._updateTimerDisplay();
+    }, 1000);
   }
 
-  _updateTimerDisplay(currentTimersMs) {
+  _updateTimerDisplay() {
     if (!this.activeMatch) {
       document.getElementById('user-timer').innerText = '—';
       document.getElementById('opponent-timer').innerText = '—';
@@ -671,32 +656,18 @@ export class ChessApp {
       document.getElementById('opponent-timer').classList.remove('running-down');
       return;
     }
-
-    const format = (ms) => {
-      const totalSeconds = ms / 1000;
-      const minutes = Math.floor(totalSeconds / 60);
-      const seconds = Math.floor(totalSeconds % 60);
-      
-      if (totalSeconds < 10) {
-        // Show one decimal point when less than 10 seconds
-        return `${seconds}.${Math.floor((ms % 1000) / 100)}`;
-      }
-      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    };
-
+    const format = (s) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
     const isWhite = this.board.playerColor === 'white';
-    const myMs = isWhite ? currentTimersMs.white : currentTimersMs.black;
-    const opponentMs = isWhite ? currentTimersMs.black : currentTimersMs.white;
-    
+    const myTimer = isWhite ? this.timers.white : this.timers.black;
+    const opponentTimer = isWhite ? this.timers.black : this.timers.white;
     const myEl = document.getElementById('user-timer');
     const oppEl = document.getElementById('opponent-timer');
 
-    myEl.innerText = format(myMs);
-    oppEl.innerText = format(opponentMs);
+    myEl.innerText = format(myTimer);
+    oppEl.innerText = format(opponentTimer);
 
-    const activeColor = this.board.activeTurn;
-    myEl.classList.toggle('running-down', activeColor === this.board.playerColor && myMs <= 15000);
-    oppEl.classList.toggle('running-down', activeColor !== this.board.playerColor && opponentMs <= 15000);
+    myEl.classList.toggle('running-down', this.board.activeTurn === this.board.playerColor && myTimer <= 15 && myTimer > 0);
+    oppEl.classList.toggle('running-down', this.board.activeTurn !== this.board.playerColor && opponentTimer <= 15 && opponentTimer > 0);
   }
 
   _updateTurnIndicator() {
@@ -911,14 +882,8 @@ export class ChessApp {
 
   _recordMoveMeta(move) {
     const moveColor = move.piece === move.piece.toUpperCase() ? 'white' : 'black';
-    const activeColor = this.board.activeTurn;
-    const now = Date.now();
-    const elapsed = now - this.lastTurnTimestamp;
-    
-    // Approximate clock at the time of the move for PGN
-    const remainingMs = this.timersMs[moveColor] - elapsed;
-    const clock = this._formatClock(Math.max(0, Math.floor(remainingMs / 1000)));
-    this.pgnMoves.push({ move, color: moveColor, clock, remainingMs: Math.max(0, remainingMs) });
+    const clock = this._formatClock(this.timers[moveColor]);
+    this.pgnMoves.push({ move, color: moveColor, clock });
   }
 
   _formatMaterialBadge(value) {
@@ -995,14 +960,8 @@ export class ChessApp {
       .replace(/\}/g, '\\}');
   }
 
-  _formatPgnComment(ms) {
-    if (!ms && ms !== 0) return '';
-    const s = ms / 1000;
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const secs = (s % 60).toFixed(1);
-    const timeStr = `${h}:${m.toString().padStart(2, '0')}:${secs.padStart(4, '0')}`;
-    return ` {[%clk ${timeStr}]}`;
+  _formatPgnComment(clock) {
+    return clock ? ` {[%clk ${clock}]}` : '';
   }
 
   _formatChatComment(entry) {
@@ -1021,8 +980,8 @@ export class ChessApp {
 
       const whiteSan = whiteMeta && whiteMeta.move ? this._getSan(whiteMeta.move, temp) : '';
       const blackSan = blackMeta && blackMeta.move ? this._getSan(blackMeta.move, temp) : '';
-      const whiteClock = whiteMeta ? this._formatPgnComment(whiteMeta.remainingMs) : '';
-      const blackClock = blackMeta ? this._formatPgnComment(blackMeta.remainingMs) : '';
+      const whiteClock = whiteMeta ? this._formatPgnComment(whiteMeta.clock) : '';
+      const blackClock = blackMeta ? this._formatPgnComment(blackMeta.clock) : '';
       const pairComments = this.chatLog
         .filter(entry => entry.moveIndex === i || entry.moveIndex === i + 1)
         .map(entry => this._formatChatComment(entry))

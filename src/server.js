@@ -134,37 +134,26 @@ io.on('connection', (socket) => {
 
     // Pair them into a match
     const matchId = `${fromSocketId}:${socket.id}`;
-    const now = Date.now();
-    matches.set(matchId, { 
-      white: whiteId, 
-      black: blackId,
-      timers: { white: timeSeconds * 1000, black: timeSeconds * 1000 },
-      increment: incrementSeconds * 1000,
-      activeTurn: 'white',
-      lastTurnTimestamp: now
-    });
+    matches.set(matchId, { white: whiteId, black: blackId });
 
     // Mark both as playing
     if (users.has(fromSocketId)) users.get(fromSocketId).status = 'playing';
     if (users.has(socket.id)) users.get(socket.id).status = 'playing';
 
     // Notify both players of match start
-    const startData = {
-      matchId,
-      timeSeconds: timeSeconds || 180,
-      incrementSeconds: incrementSeconds || 0,
-      lastTurnTimestamp: matches.get(matchId).lastTurnTimestamp
-    };
-
     io.to(whiteId).emit('match_started', {
-      ...startData,
+      matchId,
       color: 'white',
-      opponent: { username: users.get(blackId).username, emoji: users.get(blackId).emoji }
+      opponent: { username: users.get(blackId).username, emoji: users.get(blackId).emoji },
+      timeSeconds: timeSeconds || 180,
+      incrementSeconds: incrementSeconds || 0
     });
     io.to(blackId).emit('match_started', {
-      ...startData,
+      matchId,
       color: 'black',
-      opponent: { username: users.get(whiteId).username, emoji: users.get(whiteId).emoji }
+      opponent: { username: users.get(whiteId).username, emoji: users.get(whiteId).emoji },
+      timeSeconds: timeSeconds || 180,
+      incrementSeconds: incrementSeconds || 0
     });
 
     // Refresh lobby for remaining players
@@ -176,22 +165,9 @@ io.on('connection', (socket) => {
     const match = matches.get(matchId);
     if (!match) return;
 
-    const now = Date.now();
-    const elapsed = now - match.lastTurnTimestamp;
-    const color = match.white === socket.id ? 'white' : 'black';
-    
-    // Validate turn
-    if (match.activeTurn !== color) return;
-
-    // Deduct time and add increment
-    match.timers[color] = Math.max(0, match.timers[color] - elapsed + match.increment);
-    match.activeTurn = color === 'white' ? 'black' : 'white';
-    match.lastTurnTimestamp = now;
-
-    // Relay move and authoritative timers to both players
-    const moveData = { fromRow, fromCol, toRow, toCol, promotion, timers: match.timers, lastTurnTimestamp: match.lastTurnTimestamp, activeTurn: match.activeTurn };
-    io.to(match.white).emit('move_received', moveData);
-    io.to(match.black).emit('move_received', moveData);
+    // Relay move to the opponent
+    const opponentSocketId = match.white === socket.id ? match.black : match.white;
+    io.to(opponentSocketId).emit('move_received', { fromRow, fromCol, toRow, toCol, promotion });
   });
 
   // ── Match Actions ───────────────────────────────────────────────────────────
