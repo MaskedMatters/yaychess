@@ -165,7 +165,7 @@ export class ChessApp {
         this.board.activeTurn = liveSnap.activeTurn;
       }
 
-      this.board.executeMove(fromRow, fromCol, toRow, toCol, false);
+      this.board.executeMove(fromRow, fromCol, toRow, toCol, false, true);
       this._updateMaterialDisplay();
 
       // Apply increment to opponent

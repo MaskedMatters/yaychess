@@ -121,10 +121,16 @@ export class ChessBoard {
   }
 
   // Render piece images onto squares
-  render() {
+  render(skipSquare = null) {
     const displayState = this.virtualBoardState || this.boardState;
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
+        if (skipSquare && skipSquare.r === r && skipSquare.c === c) {
+          const oldImg = this.squares[r][c].querySelector('.piece');
+          if (oldImg) oldImg.remove();
+          continue;
+        }
+
         const squareEl = this.squares[r][c];
         const piece = displayState[r][c];
 
@@ -499,7 +505,9 @@ export class ChessBoard {
     if (this.selectedSquare) {
       const isValid = this.selectedSquare.validMoves.some(m => m.r === row && m.c === col);
       if (isValid) {
-        this.executeMove(this.selectedSquare.row, this.selectedSquare.col, row, col, true);
+        const animate = !this._justDragged;
+        this.executeMove(this.selectedSquare.row, this.selectedSquare.col, row, col, true, animate);
+        this._justDragged = false;
         return;
       }
     }
@@ -535,9 +543,11 @@ export class ChessBoard {
   }
 
   // Execute a move — local flag determines if we fire the onMove callback
-  executeMove(fromRow, fromCol, toRow, toCol, isLocal = false) {
+  executeMove(fromRow, fromCol, toRow, toCol, isLocal = false, animate = true) {
     const piece = this.boardState[fromRow][fromCol];
     const captured = this.boardState[toRow][toCol];
+    if (!piece) return;
+
     const isPawn = piece.toLowerCase() === 'p';
     const isKing = piece.toLowerCase() === 'k';
     const isRook = piece.toLowerCase() === 'r';
@@ -545,6 +555,51 @@ export class ChessBoard {
     const opponent = color === 'white' ? 'black' : 'white';
     const moveNotation = { piece, from: this._positionToAlgebraic(fromRow, fromCol), to: this._positionToAlgebraic(toRow, toCol) };
 
+    const fromSq = this.squares[fromRow][fromCol];
+    const toSq = this.squares[toRow][toCol];
+
+    if (animate) {
+      const fromRect = fromSq.getBoundingClientRect();
+      const toRect = toSq.getBoundingClientRect();
+      const boardRect = this.boardEl.getBoundingClientRect();
+
+      const pieceImg = fromSq.querySelector('.piece');
+      if (pieceImg) {
+        const clone = pieceImg.cloneNode(true);
+        clone.style.position = 'fixed';
+        clone.style.left = `${fromRect.left}px`;
+        clone.style.top = `${fromRect.top}px`;
+        clone.style.width = `${fromRect.width}px`;
+        clone.style.height = `${fromRect.height}px`;
+        clone.style.zIndex = '500';
+        clone.style.transition = 'all 0.25s cubic-bezier(0.2, 0, 0.2, 1)';
+        clone.style.pointerEvents = 'none';
+        document.body.appendChild(clone);
+
+        // Actual state update
+        this._finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal);
+        
+        // Hide destination piece during animation
+        this.render({ r: toRow, c: toCol });
+
+        requestAnimationFrame(() => {
+          clone.style.left = `${toRect.left}px`;
+          clone.style.top = `${toRect.top}px`;
+        });
+
+        setTimeout(() => {
+          clone.remove();
+          this.render();
+        }, 250);
+        return;
+      }
+    }
+
+    this._finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal);
+    this.render();
+  }
+
+  _finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal) {
     // Handle en passant capture
     if (isPawn && this.gameState.enPassantTarget) {
       const [epR, epC] = this._algebraicToPosition(this.gameState.enPassantTarget);
@@ -625,7 +680,6 @@ export class ChessBoard {
     this.clearRightClickVisuals();
     this._clearLastMoveHighlights();
     this.clearHighlights();
-    this.render();
 
     this.squares[fromRow][fromCol].classList.add('last-move');
     this.squares[toRow][toCol].classList.add('last-move');
