@@ -156,6 +156,15 @@ export class ChessApp {
 
     // Incoming move from opponent
     this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol }) => {
+      // If the viewer is browsing history, the board's visual state is a past
+      // snapshot. We must restore the real live position before executing the
+      // move, otherwise executeMove will operate on stale/incorrect data.
+      if (this.moveSnapshots && this.navIndex < this.moveSnapshots.length - 1) {
+        const liveSnap = this.moveSnapshots[this.moveSnapshots.length - 1];
+        this.board.boardState = liveSnap.boardState.map(r => [...r]);
+        this.board.activeTurn = liveSnap.activeTurn;
+      }
+
       this.board.executeMove(fromRow, fromCol, toRow, toCol, false);
       this._updateMaterialDisplay();
 
@@ -164,6 +173,10 @@ export class ChessApp {
       this.timers[opponentColor] += this.incrementSeconds;
       this._updateTimerDisplay();
       this._recordMoveMeta(this.board.getRawMoveHistory().slice(-1)[0]);
+      this._recordMoveSnapshot(fromRow, fromCol, toRow, toCol);
+
+      // Always advance to the new latest position
+      this._navigateTo(this.moveSnapshots.length - 1);
 
       this._updateTurnIndicator();
     });
@@ -307,6 +320,8 @@ export class ChessApp {
       this._updateTimerDisplay();
       this._recordMoveMeta(this.board.getRawMoveHistory().slice(-1)[0]);
       this._updateMaterialDisplay();
+      this._recordMoveSnapshot(fromRow, fromCol, toRow, toCol);
+      this._navigateTo(this.moveSnapshots.length - 1);
       
       this._updateTurnIndicator();
     };
@@ -343,9 +358,9 @@ export class ChessApp {
       `<div class="avatar-placeholder">${opponent.emoji}</div>`;
     document.getElementById('opponent-avatar').className = 'avatar-wrapper online';
 
-    // Toggle UI: Players list -> Chat
+    // Toggle UI: Players list -> Match view (navigator + chat)
     const lobbyPlayersView = document.getElementById('lobby-players-view');
-    const gameChatView = document.getElementById('game-chat-view');
+    const gameMatchView = document.getElementById('game-match-view');
     const chatMessages = document.getElementById('chat-messages');
     const sectionVariant = document.getElementById('section-variant');
     const sectionTime = document.getElementById('section-time');
@@ -353,8 +368,19 @@ export class ChessApp {
     if (lobbyPlayersView) lobbyPlayersView.classList.add('hidden');
     if (sectionVariant) sectionVariant.classList.add('hidden');
     if (sectionTime) sectionTime.classList.add('hidden');
-    if (gameChatView) gameChatView.classList.remove('hidden');
+    if (gameMatchView) gameMatchView.classList.remove('hidden');
     if (chatMessages) chatMessages.innerHTML = '';
+
+    // Initialize move history snapshots
+    this.moveSnapshots = [{
+      boardState: this.board.boardState.map(r => [...r]),
+      activeTurn: 'white',
+      lastMoveFrom: null,
+      lastMoveTo: null
+    }];
+    this.navIndex = 0;
+    this._updateNavigator();
+    this._setupNavigatorButtons();
 
     // Show action bar
     document.getElementById('game-actions').classList.remove('hidden');
@@ -390,16 +416,18 @@ export class ChessApp {
     document.getElementById('opponent-avatar').innerHTML = '<div class="avatar-placeholder">👤</div>';
     document.getElementById('opponent-avatar').className = 'avatar-wrapper offline';
 
-    // Toggle UI: Chat -> Players list
+    // Toggle UI: Match view -> Players list
     const lobbyPlayersView = document.getElementById('lobby-players-view');
-    const gameChatView = document.getElementById('game-chat-view');
+    const gameMatchView = document.getElementById('game-match-view');
     const sectionVariant = document.getElementById('section-variant');
     const sectionTime = document.getElementById('section-time');
     
     if (lobbyPlayersView) lobbyPlayersView.classList.remove('hidden');
     if (sectionVariant) sectionVariant.classList.remove('hidden');
     if (sectionTime) sectionTime.classList.remove('hidden');
-    if (gameChatView) gameChatView.classList.add('hidden');
+    if (gameMatchView) gameMatchView.classList.add('hidden');
+    this.moveSnapshots = [];
+    this.navIndex = 0;
 
     // Hide action bar
     document.getElementById('game-actions').classList.add('hidden');
@@ -414,6 +442,122 @@ export class ChessApp {
     document.getElementById('user-timer').classList.remove('active');
     document.getElementById('opponent-timer').classList.remove('active');
     this._updateTimerDisplay();
+  }
+
+  // ─── Move Navigator ─────────────────────────────────────────────────────────
+
+  _recordMoveSnapshot(fromRow, fromCol, toRow, toCol) {
+    if (!this.moveSnapshots) return;
+    this.moveSnapshots.push({
+      boardState: this.board.boardState.map(r => [...r]),
+      activeTurn: this.board.activeTurn,
+      lastMoveFrom: { row: fromRow, col: fromCol },
+      lastMoveTo: { row: toRow, col: toCol }
+    });
+  }
+
+  _setupNavigatorButtons() {
+    const bindOnce = (id, fn) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      // Clone to remove old listeners
+      const fresh = el.cloneNode(true);
+      el.parentNode.replaceChild(fresh, el);
+      fresh.addEventListener('click', fn);
+    };
+    bindOnce('nav-start', () => this._navigateTo(0));
+    bindOnce('nav-prev',  () => this._navigateTo(Math.max(0, this.navIndex - 1)));
+    bindOnce('nav-next',  () => this._navigateTo(Math.min(this.moveSnapshots.length - 1, this.navIndex + 1)));
+    bindOnce('nav-end',   () => this._navigateTo(this.moveSnapshots.length - 1));
+  }
+
+  _navigateTo(index) {
+    if (!this.moveSnapshots || this.moveSnapshots.length === 0) return;
+    index = Math.max(0, Math.min(index, this.moveSnapshots.length - 1));
+    this.navIndex = index;
+
+    const snap = this.moveSnapshots[index];
+    // Update board visuals without firing callbacks or mutating game state
+    this.board.boardState = snap.boardState.map(r => [...r]);
+    this.board.activeTurn = snap.activeTurn;
+    this.board.clearHighlights();
+    this.board.render();
+
+    // Highlight the move that led to this snapshot
+    if (snap.lastMoveFrom && snap.lastMoveTo) {
+      this.board.squares[snap.lastMoveFrom.row][snap.lastMoveFrom.col].classList.add('last-move');
+      this.board.squares[snap.lastMoveTo.row][snap.lastMoveTo.col].classList.add('last-move');
+    }
+
+    // Lock/unlock board: only playable when on the live position
+    const isLive = index === this.moveSnapshots.length - 1;
+    const isMyTurn = this.board.activeTurn === this.board.playerColor;
+    this.board.setInteractable(isLive && isMyTurn && !!this.activeMatch);
+
+    this._updateNavigator();
+  }
+
+  _updateNavigator() {
+    const total = (this.moveSnapshots?.length ?? 1) - 1; // number of moves
+    const current = this.navIndex ?? 0;
+
+    // Update button disabled states
+    const startBtn = document.getElementById('nav-start');
+    const prevBtn  = document.getElementById('nav-prev');
+    const nextBtn  = document.getElementById('nav-next');
+    const endBtn   = document.getElementById('nav-end');
+
+    if (startBtn) startBtn.disabled = current === 0;
+    if (prevBtn)  prevBtn.disabled  = current === 0;
+    if (nextBtn)  nextBtn.disabled  = current === total;
+    if (endBtn)   endBtn.disabled   = current === total;
+
+    // Update move list chip highlights
+    const moveHistory = this.board.getRawMoveHistory();
+    const moveListEl = document.getElementById('move-list');
+    if (!moveListEl) return;
+
+    moveListEl.innerHTML = '';
+
+    // Render pairs of moves as move numbers
+    for (let i = 0; i < moveHistory.length; i++) {
+      const moveNum = Math.floor(i / 2) + 1;
+      const isWhiteMove = i % 2 === 0;
+      const mv = moveHistory[i];
+      const snapshotIndex = i + 1; // snapshot 0 = start, snapshot n = after move n
+
+      if (isWhiteMove) {
+        const numLabel = document.createElement('span');
+        numLabel.className = 'move-num';
+        numLabel.textContent = `${moveNum}.`;
+        moveListEl.appendChild(numLabel);
+      }
+
+      const label = mv.castling || `${mv.from}${mv.to}${mv.promotion ? '=' + mv.promotion : ''}`;
+      const chip = document.createElement('button');
+      chip.className = 'move-chip' + (snapshotIndex === current ? ' active' : '');
+      chip.textContent = label;
+      chip.addEventListener('click', () => this._navigateTo(snapshotIndex));
+      moveListEl.appendChild(chip);
+    }
+
+    // Shift the whole list via translateX so the active chip is centred
+    // inside the clipping track. Using transform avoids the scrollLeft
+    // limitation (overflow:hidden creates no real scroll container).
+    requestAnimationFrame(() => {
+      const activeChip = moveListEl.querySelector('.move-chip.active');
+      const trackWidth = moveListEl.parentElement.offsetWidth; // .move-list-track
+
+      if (activeChip && trackWidth > 0) {
+        // offsetLeft is relative to the flex container (no positioned ancestor
+        // between the chip and the list, so it measures from the list's left edge).
+        const chipCenter = activeChip.offsetLeft + activeChip.offsetWidth / 2;
+        const tx = trackWidth / 2 - chipCenter;
+        moveListEl.style.transform = `translateX(${tx}px)`;
+      } else {
+        moveListEl.style.transform = 'translateX(0)';
+      }
+    });
   }
 
   // ─── Chat ──────────────────────────────────────────────────────────────────

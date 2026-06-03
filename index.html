@@ -297,21 +297,47 @@
                 </div>
               </div>
 
-              <!-- Match View: Game Chat -->
-              <div id="game-chat-view" class="hidden">
-                <label class="section-label">Game Chat</label>
-                <div class="chat-messages" id="chat-messages">
-                  <!-- Messages will appear here -->
+              <!-- Match View: Move Navigator + Game Chat -->
+              <div id="game-match-view" class="hidden">
+
+                <!-- Move Navigator -->
+                <div id="move-navigator">
+                  <div class="move-list-track">
+                    <div id="move-list" class="move-list"></div>
+                  </div>
+                  <div class="move-nav-controls">
+                    <button class="nav-btn" id="nav-start" title="Go to start">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
+                    </button>
+                    <button class="nav-btn" id="nav-prev" title="Previous move">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+                    </button>
+                    <button class="nav-btn" id="nav-next" title="Next move">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                    <button class="nav-btn" id="nav-end" title="Go to latest">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
+                    </button>
+                  </div>
                 </div>
-                <div class="chat-input-wrapper">
-                  <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
-                  <button id="chat-send-btn">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <line x1="22" y1="2" x2="11" y2="13"></line>
-                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                    </svg>
-                  </button>
+
+                <!-- Game Chat -->
+                <div id="game-chat-view">
+                  <label class="section-label">Game Chat</label>
+                  <div class="chat-messages" id="chat-messages">
+                    <!-- Messages will appear here -->
+                  </div>
+                  <div class="chat-input-wrapper">
+                    <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                    <button id="chat-send-btn">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
+
               </div>
 
             </div>
