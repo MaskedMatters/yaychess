@@ -155,7 +155,7 @@ export class ChessApp {
     });
 
     // Incoming move from opponent
-    this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol }) => {
+    this.socket.on('move_received', ({ fromRow, fromCol, toRow, toCol, promotion }) => {
       // If the viewer is browsing history, the board's visual state is a past
       // snapshot. We must restore the real live position before executing the
       // move, otherwise executeMove will operate on stale/incorrect data.
@@ -165,7 +165,7 @@ export class ChessApp {
         this.board.activeTurn = liveSnap.activeTurn;
       }
 
-      this.board.executeMove(fromRow, fromCol, toRow, toCol, false, true);
+      this.board.executeMove(fromRow, fromCol, toRow, toCol, false, true, promotion);
       this._updateMaterialDisplay();
 
       // Apply increment to opponent
@@ -309,10 +309,11 @@ export class ChessApp {
     this._hideChallengeModal();
 
     // Hook up board callbacks
-    this.board.onMove = (fromRow, fromCol, toRow, toCol) => {
+    this.board.onMove = (fromRow, fromCol, toRow, toCol, promotion) => {
       this.socket.emit('make_move', {
         matchId: this.activeMatch.matchId,
-        fromRow, fromCol, toRow, toCol
+        fromRow, fromCol, toRow, toCol,
+        promotion
       });
 
       // Apply increment

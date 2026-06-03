@@ -385,7 +385,7 @@ export class ChessBoard {
     }
   }
 
-  handleMouseUp(e) {
+  async handleMouseUp(e) {
     if (!this.dragInfo) return;
 
     window.removeEventListener('mousemove', this._handleMouseMove);
@@ -413,7 +413,7 @@ export class ChessBoard {
         // Execute move if different square
         if (targetRow !== this.dragInfo.row || targetCol !== this.dragInfo.col) {
           this._justDragged = true;
-          this.handleSquareClick(targetRow, targetCol, false, true);
+          await this.handleSquareClick(targetRow, targetCol, false, true);
         }
       }
     }
@@ -421,7 +421,7 @@ export class ChessBoard {
     this.dragInfo = null;
   }
 
-  handleSquareClick(row, col, fromMousedown = false, forceExecute = false) {
+  async handleSquareClick(row, col, fromMousedown = false, forceExecute = false) {
     // Board is locked unless this client is playing
     if (!this.interactable) return;
     
@@ -455,7 +455,7 @@ export class ChessBoard {
         const isValidBasicMove = this.selectedSquare.validMoves.some(m => m.r === row && m.c === col);
         if (isValidBasicMove) {
           // Record premove
-          this.addPremove(this.selectedSquare.row, this.selectedSquare.col, row, col);
+          await this.addPremove(this.selectedSquare.row, this.selectedSquare.col, row, col);
         }
         
         this.clearHighlights();
@@ -506,7 +506,7 @@ export class ChessBoard {
       const isValid = this.selectedSquare.validMoves.some(m => m.r === row && m.c === col);
       if (isValid) {
         const animate = !this._justDragged;
-        this.executeMove(this.selectedSquare.row, this.selectedSquare.col, row, col, true, animate);
+        await this.executeMove(this.selectedSquare.row, this.selectedSquare.col, row, col, true, animate);
         this._justDragged = false;
         return;
       }
@@ -543,7 +543,7 @@ export class ChessBoard {
   }
 
   // Execute a move — local flag determines if we fire the onMove callback
-  executeMove(fromRow, fromCol, toRow, toCol, isLocal = false, animate = true) {
+  async executeMove(fromRow, fromCol, toRow, toCol, isLocal = false, animate = true, promotionPiece = null) {
     const piece = this.boardState[fromRow][fromCol];
     const captured = this.boardState[toRow][toCol];
     if (!piece) return;
@@ -557,6 +557,12 @@ export class ChessBoard {
 
     const fromSq = this.squares[fromRow][fromCol];
     const toSq = this.squares[toRow][toCol];
+
+    // Handle local promotion choice
+    let promo = promotionPiece;
+    if (isLocal && isPawn && (toRow === 0 || toRow === 7) && !promo) {
+      promo = await this.promptPromotion(color);
+    }
 
     if (animate) {
       const fromRect = fromSq.getBoundingClientRect();
@@ -577,7 +583,7 @@ export class ChessBoard {
         document.body.appendChild(clone);
 
         // Actual state update
-        this._finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal);
+        this._finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal, promo);
         
         // Hide destination piece during animation
         this.render({ r: toRow, c: toCol });
@@ -595,11 +601,11 @@ export class ChessBoard {
       }
     }
 
-    this._finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal);
+    this._finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal, promo);
     this.render();
   }
 
-  _finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal) {
+  _finalizeMove(fromRow, fromCol, toRow, toCol, piece, captured, moveNotation, isPawn, isKing, isRook, color, opponent, isLocal, promotionPiece = null) {
     // Handle en passant capture
     if (isPawn && this.gameState.enPassantTarget) {
       const [epR, epC] = this._algebraicToPosition(this.gameState.enPassantTarget);
@@ -625,10 +631,11 @@ export class ChessBoard {
     this.boardState[toRow][toCol] = piece;
     this.boardState[fromRow][fromCol] = '';
 
-    // Automatic promotion to queen
+    // Handle promotion
     if (isPawn && (toRow === 0 || toRow === 7)) {
-      this.boardState[toRow][toCol] = color === 'white' ? 'Q' : 'q';
-      moveNotation.promotion = 'Q';
+      const promo = promotionPiece || 'Q';
+      this.boardState[toRow][toCol] = color === 'white' ? promo.toUpperCase() : promo.toLowerCase();
+      moveNotation.promotion = promo.toUpperCase();
     }
 
     // Castling rights update
@@ -694,7 +701,7 @@ export class ChessBoard {
 
     // Fire callback so app.js can relay move via socket FIRST
     if (isLocal && this.onMove) {
-      this.onMove(fromRow, fromCol, toRow, toCol);
+      this.onMove(fromRow, fromCol, toRow, toCol, moveNotation.promotion);
     }
 
     // Check for check/checkmate
@@ -726,23 +733,58 @@ export class ChessBoard {
     }
   }
 
-  addPremove(fromR, fromC, toR, toC) {
+  promptPromotion(color) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('promotion-modal');
+      const container = document.getElementById('promotion-options');
+      container.innerHTML = '';
+
+      const pieces = [
+        { type: 'Q', label: 'Queen' },
+        { type: 'R', label: 'Rook' },
+        { type: 'B', label: 'Bishop' },
+        { type: 'N', label: 'Knight' }
+      ];
+
+      pieces.forEach(p => {
+        const char = color === 'white' ? p.type : p.type.toLowerCase();
+        const btn = document.createElement('button');
+        btn.className = 'promo-btn';
+        btn.innerHTML = `
+          <img src="${this.pieceImages[char]}" class="promo-img">
+          <span class="promo-label">${p.label}</span>
+        `;
+        btn.onclick = () => {
+          modal.classList.add('hidden');
+          resolve(p.type);
+        };
+        container.appendChild(btn);
+      });
+
+      modal.classList.remove('hidden');
+    });
+  }
+
+  async addPremove(fromR, fromC, toR, toC) {
     if (!this.virtualBoardState) {
       this.virtualBoardState = this.boardState.map(r => [...r]);
     }
     
     // Visually move the piece in the virtual board
     let piece = this.virtualBoardState[fromR][fromC];
+    let promotion = null;
     
     // Handle virtual promotion for pawns reaching the last rank
     if (piece.toLowerCase() === 'p' && (toR === 0 || toR === 7)) {
-      piece = piece === 'P' ? 'Q' : 'q';
+      const color = piece === 'P' ? 'white' : 'black';
+      promotion = await this.promptPromotion(color);
+      piece = color === 'white' ? promotion.toUpperCase() : promotion.toLowerCase();
     }
 
     this.virtualBoardState[toR][toC] = piece;
     this.virtualBoardState[fromR][fromC] = '';
 
-    this.premoveQueue.push({ fromR, fromC, toR, toC });
+    this.premoveQueue.push({ fromR, fromC, toR, toC, promotion });
     this._refreshPremoveHighlights();
     this.render();
     this.playSynthSound('move');
@@ -780,7 +822,7 @@ export class ChessBoard {
     if (isLegal) {
       // Small delay to make it feel smoother if it's right after an opponent move
       setTimeout(() => {
-        this.executeMove(move.fromR, move.fromC, move.toR, move.toC, true);
+        this.executeMove(move.fromR, move.fromC, move.toR, move.toC, true, true, move.promotion);
       }, 100);
     } else {
       this.clearPremoves();

@@ -161,13 +161,13 @@ io.on('connection', (socket) => {
   });
 
   // ── In-game Move ─────────────────────────────────────────────────────────────
-  socket.on('make_move', ({ matchId, fromRow, fromCol, toRow, toCol }) => {
+  socket.on('make_move', ({ matchId, fromRow, fromCol, toRow, toCol, promotion }) => {
     const match = matches.get(matchId);
     if (!match) return;
 
     // Relay move to the opponent
     const opponentSocketId = match.white === socket.id ? match.black : match.white;
-    io.to(opponentSocketId).emit('move_received', { fromRow, fromCol, toRow, toCol });
+    io.to(opponentSocketId).emit('move_received', { fromRow, fromCol, toRow, toCol, promotion });
   });
 
   // ── Match Actions ───────────────────────────────────────────────────────────
