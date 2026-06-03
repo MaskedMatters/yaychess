@@ -13,6 +13,38 @@ const io = new Server(server);
 
 const START_PORT = parseInt(process.env.PORT) || 3000;
 
+const ADJECTIVES = [
+  'Swift', 'Crafty', 'Bold', 'Silent', 'Clever',
+  'Fierce', 'Mighty', 'Nimble', 'Sneaky', 'Shadow',
+  'Golden', 'Cosmic', 'Mystic', 'Radiant', 'Brave',
+  'Wild', 'Astro', 'Alpha', 'Zenith', 'Apex'
+];
+
+const ANIMALS = [
+  'Panther', 'Falcon', 'Cobra', 'Badger', 'Fox', 'Wolf', 'Tiger', 'Shark',
+  'Owl', 'Lynx', 'Raven', 'Grizzly', 'Stallion', 'Viper', 'Phoenix', 'Hawk',
+  'Cheetah', 'Orca'
+];
+
+function generateRandomIdentity() {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
+  return { username: `${adj}${animal}`, emoji: '🧩' };
+}
+
+function ensureUniqueUsername(socketId, preferredUsername) {
+  const baseName = (preferredUsername || '').trim() || generateRandomIdentity().username;
+  let candidate = baseName;
+  let suffix = 2;
+
+  while (Array.from(users.values()).some((user) => user.socketId !== socketId && user.username === candidate)) {
+    candidate = `${baseName} ${suffix}`;
+    suffix += 1;
+  }
+
+  return candidate;
+}
+
 // Serve static files
 const projectRoot = path.resolve(__dirname, '..');
 app.use(express.static(projectRoot));
@@ -32,10 +64,13 @@ io.on('connection', (socket) => {
 
   // ── Registration ────────────────────────────────────────────────────────────
   socket.on('register_user', ({ username, emoji }) => {
-    users.set(socket.id, { socketId: socket.id, username, emoji, status: 'lobby' });
+    const uniqueUsername = ensureUniqueUsername(socket.id, username);
+    const safeEmoji = typeof emoji === 'string' && emoji.trim() ? emoji.trim() : '🧩';
 
-    // Confirm registration to the client
-    socket.emit('registered', { socketId: socket.id });
+    users.set(socket.id, { socketId: socket.id, username: uniqueUsername, emoji: safeEmoji, status: 'lobby' });
+
+    // Confirm registration to the client with the authoritative server-side identity
+    socket.emit('registered', { socketId: socket.id, username: uniqueUsername, emoji: safeEmoji });
 
     // Broadcast updated lobby to everyone
     broadcastLobby();
@@ -228,8 +263,10 @@ function endMatch(matchId) {
 // Broadcast the current lobby (only 'lobby' status users) to all connected clients
 function broadcastLobby() {
   const lobbyUsers = Array.from(users.values()).filter(u => u.status === 'lobby');
-  // Each client will filter out themselves
-  io.emit('online_users_list', lobbyUsers);
+
+  for (const [socketId] of users) {
+    io.to(socketId).emit('online_users_list', lobbyUsers.filter(u => u.socketId !== socketId));
+  }
 }
 
 // ─── Start Server ─────────────────────────────────────────────────────────────

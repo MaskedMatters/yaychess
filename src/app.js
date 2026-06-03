@@ -116,10 +116,14 @@ export class ChessApp {
       });
     });
 
+    this.socket.on('registered', ({ username, emoji }) => {
+      this.currentUser = { username, emoji };
+      this._renderUserProfile();
+    });
+
     // Receive the current lobby list
     this.socket.on('online_users_list', (users) => {
-      // Exclude ourselves by socketId
-      this.onlinePlayers = users.filter(u => u.socketId !== this.socket.id);
+      this.onlinePlayers = users;
       this._renderLobby(this.onlinePlayers);
     });
 
@@ -343,8 +347,12 @@ export class ChessApp {
     const lobbyPlayersView = document.getElementById('lobby-players-view');
     const gameChatView = document.getElementById('game-chat-view');
     const chatMessages = document.getElementById('chat-messages');
+    const sectionVariant = document.getElementById('section-variant');
+    const sectionTime = document.getElementById('section-time');
 
     if (lobbyPlayersView) lobbyPlayersView.classList.add('hidden');
+    if (sectionVariant) sectionVariant.classList.add('hidden');
+    if (sectionTime) sectionTime.classList.add('hidden');
     if (gameChatView) gameChatView.classList.remove('hidden');
     if (chatMessages) chatMessages.innerHTML = '';
 
@@ -385,7 +393,12 @@ export class ChessApp {
     // Toggle UI: Chat -> Players list
     const lobbyPlayersView = document.getElementById('lobby-players-view');
     const gameChatView = document.getElementById('game-chat-view');
+    const sectionVariant = document.getElementById('section-variant');
+    const sectionTime = document.getElementById('section-time');
+    
     if (lobbyPlayersView) lobbyPlayersView.classList.remove('hidden');
+    if (sectionVariant) sectionVariant.classList.remove('hidden');
+    if (sectionTime) sectionTime.classList.remove('hidden');
     if (gameChatView) gameChatView.classList.add('hidden');
 
     // Hide action bar
@@ -454,12 +467,15 @@ export class ChessApp {
     }
 
     subtitle.innerText = reason.charAt(0).toUpperCase() + reason.slice(1).replace('_', ' ');
-    overlay.classList.remove('hidden');
-    this._setInGameExportEnabled(false);
-    this._setResultExportEnabled(true);
     
     // Stop timers immediately
     clearInterval(this.timerInterval);
+
+    setTimeout(() => {
+      overlay.classList.remove('hidden');
+      this._setInGameExportEnabled(false);
+      this._setResultExportEnabled(true);
+    }, 2000);
   }
 
   _startTimer() {
@@ -1186,7 +1202,4 @@ export class ChessApp {
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  const app = new ChessApp();
-  app.init();
-});
+

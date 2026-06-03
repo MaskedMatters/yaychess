@@ -273,16 +273,16 @@ export class ChessBoard {
     // Switch active turn
     this.activeTurn = this.activeTurn === 'white' ? 'black' : 'white';
 
+    // Fire callback so app.js can relay move via socket FIRST
+    if (isLocal && this.onMove) {
+      this.onMove(fromRow, fromCol, toRow, toCol);
+    }
+
     // Check for check/checkmate
     this.checkGameState();
 
     if (isLocal && this.gameState.halfMoveClock >= 100 && this.onDraw) {
       this.onDraw();
-    }
-
-    // Fire callback so app.js can relay move via socket
-    if (isLocal && this.onMove) {
-      this.onMove(fromRow, fromCol, toRow, toCol);
     }
   }
 
