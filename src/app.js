@@ -347,8 +347,12 @@ export class ChessApp {
     const lobbyPlayersView = document.getElementById('lobby-players-view');
     const gameChatView = document.getElementById('game-chat-view');
     const chatMessages = document.getElementById('chat-messages');
+    const sectionVariant = document.getElementById('section-variant');
+    const sectionTime = document.getElementById('section-time');
 
     if (lobbyPlayersView) lobbyPlayersView.classList.add('hidden');
+    if (sectionVariant) sectionVariant.classList.add('hidden');
+    if (sectionTime) sectionTime.classList.add('hidden');
     if (gameChatView) gameChatView.classList.remove('hidden');
     if (chatMessages) chatMessages.innerHTML = '';
 
@@ -389,7 +393,12 @@ export class ChessApp {
     // Toggle UI: Chat -> Players list
     const lobbyPlayersView = document.getElementById('lobby-players-view');
     const gameChatView = document.getElementById('game-chat-view');
+    const sectionVariant = document.getElementById('section-variant');
+    const sectionTime = document.getElementById('section-time');
+    
     if (lobbyPlayersView) lobbyPlayersView.classList.remove('hidden');
+    if (sectionVariant) sectionVariant.classList.remove('hidden');
+    if (sectionTime) sectionTime.classList.remove('hidden');
     if (gameChatView) gameChatView.classList.add('hidden');
 
     // Hide action bar
