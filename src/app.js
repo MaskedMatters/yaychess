@@ -116,10 +116,14 @@ export class ChessApp {
       });
     });
 
+    this.socket.on('registered', ({ username, emoji }) => {
+      this.currentUser = { username, emoji };
+      this._renderUserProfile();
+    });
+
     // Receive the current lobby list
     this.socket.on('online_users_list', (users) => {
-      // Exclude ourselves by socketId
-      this.onlinePlayers = users.filter(u => u.socketId !== this.socket.id);
+      this.onlinePlayers = users;
       this._renderLobby(this.onlinePlayers);
     });
 
@@ -1186,7 +1190,4 @@ export class ChessApp {
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  const app = new ChessApp();
-  app.init();
-});
+
