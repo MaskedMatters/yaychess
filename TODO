@@ -8,12 +8,12 @@ The material indicator's should be shown as a badge type thing next to both play
 - ADD PGN & FEN DOWNLOAD
 PGN and FEN downloads should not be available to download while the game is happening. When the game is terminated due to a loss/win or draw, there should be an option to download the game's PGN and FEN on the won/lost popup. 
 - DISALLOW USERS TO CHALLENGE THEMSELVES
+- ALLOW OPPONENT TO SEE FINAL MOVE BEFORE CHECKMATE
 
 
 IN PIPELINE:
 - ADD LIAM's CHESS^2
 - ADD MORE PROMOTION OPTIONS
-- ALLOW OPPONENT TO SEE FINAL MOVE BEFORE CHECKMATE
 - ADD MOVE ANIMATIONS
 - ADD PREMOVES
 - INCREASE BOARD SIZE BASED ON WINDOW SIZE

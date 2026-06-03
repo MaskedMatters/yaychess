@@ -458,12 +458,15 @@ export class ChessApp {
     }
 
     subtitle.innerText = reason.charAt(0).toUpperCase() + reason.slice(1).replace('_', ' ');
-    overlay.classList.remove('hidden');
-    this._setInGameExportEnabled(false);
-    this._setResultExportEnabled(true);
     
     // Stop timers immediately
     clearInterval(this.timerInterval);
+
+    setTimeout(() => {
+      overlay.classList.remove('hidden');
+      this._setInGameExportEnabled(false);
+      this._setResultExportEnabled(true);
+    }, 2000);
   }
 
   _startTimer() {
