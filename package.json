@@ -1,7 +1,7 @@
 {
   "name": "yaychess",
-  "version": "v1.0.0-p",
-  "description": "It's a Chess interface where things are yeah...",
+  "version": "v1.2.4-p",
+  "description": "Premium real-time chess interface with premoves, drag-and-drop, and synchronized timers.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {
